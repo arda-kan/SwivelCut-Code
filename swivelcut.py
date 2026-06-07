@@ -320,50 +320,6 @@ class SwivelCut:
                 c = min_interval
 
 
-def jog_with_buttons(arm, pin_a=4, pin_b=16, step_deg=1.0):
-    """Hold a button to jog a joint. Wire each button to GND with internal
-    pull-ups (button A -> joint 1, button B -> joint 2). Ctrl-C to stop."""
-    from time import sleep_ms
-    a = Pin(pin_a, Pin.IN, Pin.PULL_UP)
-    b = Pin(pin_b, Pin.IN, Pin.PULL_UP)
-    arm.enable()
-    print("Jog: A=J1+, B=J2+. Ctrl-C to quit.")
-    try:
-        while True:
-            if a.value() == 0:
-                arm.move_joint(1, step_deg, relative=True)
-            if b.value() == 0:
-                arm.move_joint(2, step_deg, relative=True)
-            sleep_ms(20)
-    except KeyboardInterrupt:
-        print("stopped:", arm.position())
-    finally:
-        arm.disable()
-
-
-def demo():
-    arm = SwivelCut()
-    arm.enable()
-    try:
-        print("start :", arm.position())
-
-        arm.move_joint(1, 30)          # shoulder only
-        arm.move_joint(2, -60)         # elbow only
-        arm.move_to_angles(15, -30)    # both, coordinated
-        arm.move_to_xy(250, 180, elbow="up")
-        print("at xy :", arm.position())
-
-        # cut a 150 mm square outline
-        arm.cut_line(150, -75, 300, -75)
-        arm.cut_line(300, -75, 300,  75)
-        arm.cut_line(300,  75, 150,  75)
-        arm.cut_line(150,  75, 150, -75)
-
-        arm.move_to_angles(0, 0)
-        print("done  :", arm.position())
-    finally:
-        arm.disable()
-
 
 if __name__ == "__main__":
     # demo()
