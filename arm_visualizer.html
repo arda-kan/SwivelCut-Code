@@ -1,0 +1,466 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2-DOF Arm · Motion Visualizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#070b0c; --panel:#0d1315; --panel2:#11191b; --edge:#1d2a2d;
+    --grid:rgba(120,200,200,.06); --grid2:rgba(120,200,200,.13);
+    --txt:#d3e6e6; --dim:#6d8489; --faint:#3f5256;
+    --amber:#ffb000; --cyan:#33e3cf; --red:#ff6b7d; --violet:#9d8cff;
+    --link1:#ffb000; --link2:#33e3cf; --target:#ff6b7d; --ghost:#5d7d80;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(1200px 700px at 78% -8%, rgba(51,227,207,.06), transparent 60%),
+      radial-gradient(900px 600px at 10% 110%, rgba(255,176,0,.05), transparent 55%),
+      var(--bg);
+    color:var(--txt); font-family:"JetBrains Mono",monospace;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{display:grid;grid-template-columns:340px 1fr;gap:18px;min-height:100%;
+        padding:18px;max-width:1500px;margin:0 auto}
+  @media(max-width:880px){.wrap{grid-template-columns:1fr}}
+
+  /* ---- masthead ---- */
+  .head{grid-column:1/-1;display:flex;align-items:baseline;gap:14px;
+        border-bottom:1px solid var(--edge);padding-bottom:12px;flex-wrap:wrap}
+  .head h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;
+           font-size:26px;margin:0;letter-spacing:-.5px}
+  .head h1 b{color:var(--amber)}
+  .head .sub{color:var(--dim);font-size:11.5px;letter-spacing:.5px;margin-left:auto;
+             text-transform:uppercase}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
+       background:var(--cyan);box-shadow:0 0 8px var(--cyan);margin-right:6px;
+       animation:pulse 2.4s infinite}
+  @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+
+  /* ---- panels ---- */
+  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));
+         border:1px solid var(--edge);border-radius:12px;padding:14px}
+  .controls{display:flex;flex-direction:column;gap:14px}
+  .grp{border:1px solid var(--edge);border-radius:10px;padding:11px 12px 13px;
+       background:rgba(0,0,0,.18)}
+  .grp h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;
+          font-size:11px;letter-spacing:2px;text-transform:uppercase;
+          color:var(--dim);margin:0 0 10px}
+  .row{display:flex;gap:8px}
+  .field{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
+  .field label{font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase}
+  .field input,.field select{
+    width:100%;background:#060a0b;color:var(--txt);border:1px solid var(--edge);
+    border-radius:7px;padding:7px 8px;font-family:"JetBrains Mono",monospace;
+    font-size:13px;outline:none}
+  .field input:focus,.field select:focus{border-color:var(--cyan);
+    box-shadow:0 0 0 2px rgba(51,227,207,.12)}
+
+  /* segmented toggles */
+  .seg{display:flex;border:1px solid var(--edge);border-radius:8px;overflow:hidden}
+  .seg button{flex:1;background:transparent;color:var(--dim);border:0;
+    padding:8px 4px;font-family:"JetBrains Mono",monospace;font-size:11.5px;
+    cursor:pointer;letter-spacing:.4px;transition:.14s}
+  .seg button+button{border-left:1px solid var(--edge)}
+  .seg button.on{background:var(--amber);color:#161000;font-weight:700}
+  .seg.cy button.on{background:var(--cyan);color:#00201d}
+
+  .go{width:100%;margin-top:2px;background:var(--amber);color:#161000;border:0;
+      border-radius:9px;padding:12px;font-family:"Bricolage Grotesque",sans-serif;
+      font-weight:800;font-size:14px;letter-spacing:.6px;cursor:pointer;
+      transition:.14s;text-transform:uppercase}
+  .go:hover{filter:brightness(1.08)}
+  .go:active{transform:translateY(1px)}
+  .go.busy{background:var(--faint);color:var(--dim);cursor:default}
+  .ghostbtn{background:transparent;color:var(--dim);border:1px solid var(--edge);
+      border-radius:9px;padding:10px;font-family:"JetBrains Mono",monospace;
+      font-size:12px;cursor:pointer;width:100%;margin-top:8px}
+  .ghostbtn:hover{border-color:var(--cyan);color:var(--txt)}
+
+  /* ---- stage ---- */
+  .stage{position:relative;border:1px solid var(--edge);border-radius:12px;
+         background:#050809;overflow:hidden;min-height:440px}
+  canvas{display:block;width:100%;height:100%}
+  .badge{position:absolute;top:12px;left:14px;font-size:11px;letter-spacing:1px;
+         color:var(--dim);text-transform:uppercase}
+  .err{position:absolute;top:12px;right:14px;font-size:11px;letter-spacing:1px;
+       color:var(--red);text-transform:uppercase;display:none}
+
+  /* ---- telemetry ---- */
+  .telem{grid-column:1/-1;display:grid;
+         grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .cell{background:linear-gradient(180deg,var(--panel),var(--panel2));
+        border:1px solid var(--edge);border-radius:10px;padding:11px 13px}
+  .cell .k{font-size:9.5px;letter-spacing:1.3px;color:var(--dim);text-transform:uppercase}
+  .cell .v{font-size:21px;font-weight:700;margin-top:3px;letter-spacing:-.3px}
+  .cell .u{font-size:11px;color:var(--dim);margin-left:3px;font-weight:400}
+  .v.a{color:var(--amber)} .v.c{color:var(--cyan)} .v.t{color:var(--txt)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--dim);
+          margin-top:2px}
+  .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;
+            margin-right:6px;vertical-align:middle}
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <h1>SCARA<b>·</b>SCOPE</h1>
+    <span style="color:var(--dim);font-size:12px">2-DOF planar motion visualizer</span>
+    <span class="sub"><span class="dot"></span>cardboard cutter · joint-space &amp; IK</span>
+  </div>
+
+  <!-- ============ CONTROLS ============ -->
+  <div class="panel controls">
+    <div class="grp">
+      <h2>Geometry</h2>
+      <div class="row">
+        <div class="field"><label>Link 1 L1 (mm)</label><input id="L1" type="number" value="300" step="5"></div>
+        <div class="field"><label>Link 2 L2 (mm)</label><input id="L2" type="number" value="300" step="5"></div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <h2>Drivetrain</h2>
+      <div class="row">
+        <div class="field"><label>Pulley J1</label><input id="g1" type="number" value="6" step="1"></div>
+        <div class="field"><label>Pulley J2</label><input id="g2" type="number" value="9" step="1"></div>
+      </div>
+      <div class="row" style="margin-top:9px">
+        <div class="field"><label>Steps / rev</label>
+          <select id="spr"><option>200</option><option>400</option></select></div>
+        <div class="field"><label>Microstep</label>
+          <select id="micro"><option>1</option><option>2</option><option>4</option>
+            <option>8</option><option selected>16</option><option>32</option>
+            <option>64</option><option>128</option><option>256</option></select></div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <h2>Target</h2>
+      <div class="seg cy" id="coordSeg" style="margin-bottom:10px">
+        <button data-c="xy" class="on">CARTESIAN&nbsp;X·Y</button>
+        <button data-c="polar">POLAR&nbsp;r·φ</button>
+      </div>
+      <div class="row" id="xyInputs">
+        <div class="field"><label>X (mm)</label><input id="tx" type="number" value="300" step="5"></div>
+        <div class="field"><label>Y (mm)</label><input id="ty" type="number" value="180" step="5"></div>
+      </div>
+      <div class="row" id="polarInputs" style="display:none">
+        <div class="field"><label>r (mm)</label><input id="tr" type="number" value="350" step="5"></div>
+        <div class="field"><label>φ (deg)</label><input id="tphi" type="number" value="31" step="1"></div>
+      </div>
+      <div style="margin-top:10px">
+        <label style="font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase">Elbow solution</label>
+        <div class="seg cy" id="elbowSeg" style="margin-top:5px">
+          <button data-e="up" class="on">UP</button>
+          <button data-e="down">DOWN</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grp">
+      <h2>Move</h2>
+      <label style="font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase">Joints driven</label>
+      <div class="seg" id="modeSeg" style="margin:5px 0 10px">
+        <button data-m="j1">J1 ONLY</button>
+        <button data-m="j2">J2 ONLY</button>
+        <button data-m="both" class="on">BOTH</button>
+      </div>
+      <label style="font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase">Path type (both)</label>
+      <div class="seg" id="pathSeg" style="margin-top:5px">
+        <button data-p="rapid" class="on">RAPID&nbsp;(joint)</button>
+        <button data-p="line">CUT&nbsp;(straight)</button>
+      </div>
+      <button class="go" id="go">▶ Execute move</button>
+      <button class="ghostbtn" id="home">⤺ Park to current = (0, 0) joints</button>
+    </div>
+  </div>
+
+  <!-- ============ STAGE ============ -->
+  <div class="stage">
+    <canvas id="cv"></canvas>
+    <div class="badge" id="badge">workspace · 0–600 mm</div>
+    <div class="err" id="err">⚠ target out of range</div>
+  </div>
+
+  <!-- ============ TELEMETRY ============ -->
+  <div class="telem" id="telem">
+    <div class="cell"><div class="k">θ1 shoulder</div><div class="v a" id="o_t1">0.0<span class="u">°</span></div></div>
+    <div class="cell"><div class="k">θ2 elbow</div><div class="v c" id="o_t2">0.0<span class="u">°</span></div></div>
+    <div class="cell"><div class="k">tip position</div><div class="v t" id="o_xy">—</div></div>
+    <div class="cell"><div class="k">motor 1 turns</div><div class="v a" id="o_m1">0.0<span class="u">rev</span></div></div>
+    <div class="cell"><div class="k">motor 2 turns</div><div class="v c" id="o_m2">0.0<span class="u">rev</span></div></div>
+    <div class="cell"><div class="k">Δ microsteps J1</div><div class="v a" id="o_s1">0</div></div>
+    <div class="cell"><div class="k">Δ microsteps J2</div><div class="v c" id="o_s2">0</div></div>
+    <div class="cell"><div class="k">resolution J1 / J2</div><div class="v t" id="o_res" style="font-size:14px">—</div></div>
+  </div>
+  <div class="legend" style="grid-column:1/-1">
+    <span><i style="background:var(--link1)"></i>link 1 (θ1)</span>
+    <span><i style="background:var(--link2)"></i>link 2 (θ2)</span>
+    <span><i style="background:var(--target)"></i>target</span>
+    <span><i style="background:var(--ghost)"></i>commanded pose (ghost)</span>
+    <span><i style="background:var(--cyan);opacity:.6"></i>tip trail</span>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const TAU = Math.PI*2, D2R = Math.PI/180, R2D = 180/Math.PI;
+
+// ---------------- state ----------------
+const S = {
+  L1:300, L2:300, g1:6, g2:9, spr:200, micro:16,
+  coord:"xy", elbow:"up", mode:"both", path:"rapid",
+  cur:{t1:0, t2:0},            // current joint angles (rad)
+  cmd:{t1:0, t2:0, ok:false},  // commanded/target pose from inputs
+  trail:[], anim:null
+};
+
+// ---------------- kinematics ----------------
+function forward(t1,t2){
+  return [ S.L1*Math.cos(t1)+S.L2*Math.cos(t1+t2),
+           S.L1*Math.sin(t1)+S.L2*Math.sin(t1+t2) ];
+}
+function inverse(x,y,elbow){
+  const r2=x*x+y*y;
+  const c2=(r2 - S.L1*S.L1 - S.L2*S.L2)/(2*S.L1*S.L2);
+  if(c2<-1||c2>1) return null;
+  let s2=Math.sqrt(1-c2*c2); if(elbow==="down") s2=-s2;
+  const t2=Math.atan2(s2,c2);
+  const t1=Math.atan2(y,x)-Math.atan2(S.L2*s2, S.L1+S.L2*c2);
+  return [t1,t2];
+}
+const stepsPerRad = g => S.spr*S.micro*g/TAU;
+
+// ---------------- read inputs ----------------
+function readGeom(){
+  S.L1=+$("L1").value||1; S.L2=+$("L2").value||1;
+  S.g1=+$("g1").value||1; S.g2=+$("g2").value||1;
+  S.spr=+$("spr").value;  S.micro=+$("micro").value;
+}
+function targetXY(){
+  if(S.coord==="xy") return [ +$("tx").value, +$("ty").value ];
+  const r=+$("tr").value, p=(+$("tphi").value)*D2R;
+  return [ r*Math.cos(p), r*Math.sin(p) ];
+}
+function recompute(){
+  readGeom();
+  const [x,y]=targetXY();
+  const sol=inverse(x,y,S.elbow);
+  if(sol){ S.cmd.t1=sol[0]; S.cmd.t2=sol[1]; S.cmd.ok=true; }
+  else   { S.cmd.ok=false; }
+  S.cmd.x=x; S.cmd.y=y;
+  updateTelemetry(); draw();
+}
+
+// what the chosen MODE will actually drive to (joint-only modes hold the other)
+function achievedPose(){
+  if(!S.cmd.ok) return {t1:S.cur.t1, t2:S.cur.t2};
+  if(S.mode==="j1") return {t1:S.cmd.t1, t2:S.cur.t2};
+  if(S.mode==="j2") return {t1:S.cur.t1, t2:S.cmd.t2};
+  return {t1:S.cmd.t1, t2:S.cmd.t2};
+}
+
+// ---------------- telemetry ----------------
+function fmt(n,d=1){return (n>=0?"":"")+n.toFixed(d);}
+function updateTelemetry(){
+  const tgt=achievedPose();
+  $("o_t1").innerHTML = fmt(tgt.t1*R2D)+'<span class="u">°</span>';
+  $("o_t2").innerHTML = fmt(tgt.t2*R2D)+'<span class="u">°</span>';
+  const [tx,ty]=forward(tgt.t1,tgt.t2);
+  $("o_xy").textContent = `${tx.toFixed(0)}, ${ty.toFixed(0)}`;
+  const m1=tgt.t1/TAU*S.g1, m2=tgt.t2/TAU*S.g2;
+  $("o_m1").innerHTML = fmt(m1,2)+'<span class="u">rev</span>';
+  $("o_m2").innerHTML = fmt(m2,2)+'<span class="u">rev</span>';
+  const ds1=Math.round((tgt.t1-S.cur.t1)*stepsPerRad(S.g1));
+  const ds2=Math.round((tgt.t2-S.cur.t2)*stepsPerRad(S.g2));
+  $("o_s1").textContent=ds1.toLocaleString();
+  $("o_s2").textContent=ds2.toLocaleString();
+  const r1=360/(S.spr*S.micro*S.g1), r2=360/(S.spr*S.micro*S.g2);
+  $("o_res").textContent=`${r1.toFixed(4)}° / ${r2.toFixed(4)}°`;
+  $("err").style.display = S.cmd.ok ? "none":"block";
+  $("badge").textContent = `workspace · ${Math.abs(S.L1-S.L2).toFixed(0)}–${(S.L1+S.L2).toFixed(0)} mm`;
+}
+
+// ---------------- canvas ----------------
+const cv=$("cv"), ctx=cv.getContext("2d");
+let DPR=1, W=0, H=0, scale=1, ox=0, oy=0;
+function resize(){
+  const r=cv.getBoundingClientRect();
+  DPR=window.devicePixelRatio||1;
+  cv.width=r.width*DPR; cv.height=r.height*DPR;
+  W=r.width; H=r.height;
+  fitView();
+}
+function fitView(){
+  const Rmax=S.L1+S.L2;
+  const pad=46;
+  scale=(Math.min(W,H)/2 - pad)/Rmax;
+  ox=W/2; oy=H/2;            // base at canvas centre (centre of reach disk)
+}
+const sx=x=>ox+x*scale, sy=y=>oy-y*scale;
+
+function draw(){
+  ctx.save(); ctx.scale(DPR,DPR);
+  ctx.clearRect(0,0,W,H);
+
+  // grid
+  const cs=window.getComputedStyle(document.documentElement);
+  const Cgrid=cs.getPropertyValue('--grid'), Cgrid2=cs.getPropertyValue('--grid2');
+  ctx.lineWidth=1;
+  const stepmm=50;
+  ctx.strokeStyle=Cgrid;
+  for(let gx=0; gx<=S.L1+S.L2; gx+=stepmm){
+    [gx,-gx].forEach(v=>{ctx.beginPath();ctx.moveTo(sx(v),0);ctx.lineTo(sx(v),H);ctx.stroke();});
+  }
+  for(let gy=0; gy<=S.L1+S.L2; gy+=stepmm){
+    [gy,-gy].forEach(v=>{ctx.beginPath();ctx.moveTo(0,sy(v));ctx.lineTo(W,sy(v));ctx.stroke();});
+  }
+
+  // reachable annulus
+  const Ro=(S.L1+S.L2)*scale, Ri=Math.abs(S.L1-S.L2)*scale;
+  ctx.beginPath(); ctx.arc(ox,oy,Ro,0,TAU);
+  ctx.fillStyle="rgba(51,227,207,.045)"; ctx.fill();
+  if(Ri>0){ctx.beginPath();ctx.arc(ox,oy,Ri,0,TAU);
+    ctx.fillStyle="#050809"; ctx.fill();}
+  ctx.lineWidth=1.2; ctx.strokeStyle="rgba(51,227,207,.28)";
+  ctx.beginPath(); ctx.arc(ox,oy,Ro,0,TAU); ctx.stroke();
+  if(Ri>0){ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(ox,oy,Ri,0,TAU);ctx.stroke();ctx.setLineDash([]);}
+
+  // axes
+  ctx.strokeStyle=Cgrid2; ctx.beginPath();
+  ctx.moveTo(0,sy(0));ctx.lineTo(W,sy(0));ctx.moveTo(sx(0),0);ctx.lineTo(sx(0),H);ctx.stroke();
+
+  // trail
+  if(S.trail.length>1){
+    ctx.lineWidth=2; ctx.lineJoin="round";
+    for(let i=1;i<S.trail.length;i++){
+      const a=i/S.trail.length;
+      ctx.strokeStyle=`rgba(51,227,207,${0.12+a*0.5})`;
+      ctx.beginPath();
+      ctx.moveTo(sx(S.trail[i-1][0]),sy(S.trail[i-1][1]));
+      ctx.lineTo(sx(S.trail[i][0]),sy(S.trail[i][1]));
+      ctx.stroke();
+    }
+  }
+
+  // ghost = commanded pose (where this move ends)
+  const tgt=achievedPose();
+  if(S.cmd.ok){ drawArm(tgt.t1,tgt.t2,"#5d7d80","#5d7d80",true); }
+
+  // target marker
+  if(S.cmd.ok){
+    const X=sx(S.cmd.x), Y=sy(S.cmd.y);
+    ctx.strokeStyle=cs.getPropertyValue('--target'); ctx.lineWidth=1.6;
+    ctx.beginPath();ctx.moveTo(X-9,Y);ctx.lineTo(X+9,Y);
+    ctx.moveTo(X,Y-9);ctx.lineTo(X,Y+9);ctx.stroke();
+    ctx.beginPath();ctx.arc(X,Y,6,0,TAU);ctx.stroke();
+  }
+
+  // live arm (current pose)
+  drawArm(S.cur.t1,S.cur.t2,
+    cs.getPropertyValue('--link1'), cs.getPropertyValue('--link2'), false);
+
+  ctx.restore();
+}
+
+function drawArm(t1,t2,c1,c2,ghost){
+  const ex=S.L1*Math.cos(t1), ey=S.L1*Math.sin(t1);
+  const [tx,ty]=forward(t1,t2);
+  const bw=ghost?5:11;
+  ctx.lineCap="round";
+  if(ghost){ctx.setLineDash([7,6]); ctx.globalAlpha=.85;}
+  // link1
+  ctx.lineWidth=bw; ctx.strokeStyle=c1;
+  ctx.beginPath();ctx.moveTo(sx(0),sy(0));ctx.lineTo(sx(ex),sy(ey));ctx.stroke();
+  // link2
+  ctx.strokeStyle=c2;
+  ctx.beginPath();ctx.moveTo(sx(ex),sy(ey));ctx.lineTo(sx(tx),sy(ty));ctx.stroke();
+  ctx.setLineDash([]); ctx.globalAlpha=1;
+  if(ghost) return;
+  // joints
+  joint(sx(0),sy(0), "#0b1112", c1, 9);
+  joint(sx(ex),sy(ey), "#0b1112", c2, 8);
+  // tip / blade
+  ctx.fillStyle="#050809"; ctx.strokeStyle=c2; ctx.lineWidth=2.5;
+  ctx.beginPath();ctx.arc(sx(tx),sy(ty),5,0,TAU);ctx.fill();ctx.stroke();
+}
+function joint(x,y,fill,ring,r){
+  ctx.fillStyle=fill; ctx.strokeStyle=ring; ctx.lineWidth=3;
+  ctx.beginPath();ctx.arc(x,y,r,0,TAU);ctx.fill();ctx.stroke();
+}
+
+// ---------------- animation ----------------
+function easeTrap(t){            // accel / cruise / decel-ish profile
+  const a=0.28;
+  if(t<a)        return (t*t)/(2*a*(1-a));
+  if(t<1-a)      return (t-a/2)/(1-a);
+  const u=1-t;   return 1-(u*u)/(2*a*(1-a));
+}
+function execute(){
+  if(!S.cmd.ok || S.anim) return;
+  const start={t1:S.cur.t1,t2:S.cur.t2};
+  const end=achievedPose();
+  const lineMode = (S.mode==="both" && S.path==="line");
+  const startTip=forward(start.t1,start.t2);
+  const dJoint=Math.max(Math.abs(end.t1-start.t1),Math.abs(end.t2-start.t2));
+  if(dJoint<1e-4 && !lineMode){ return; }
+  const dur=Math.max(450, Math.min(2200, dJoint*R2D*9));  // ms, ~scaled to travel
+  S.trail=[]; $("go").classList.add("busy"); $("go").textContent="● moving…";
+  const t0=performance.now();
+
+  function frame(now){
+    let p=(now-t0)/dur; if(p>1)p=1;
+    const e=easeTrap(p);
+    if(lineMode){
+      const x=startTip[0]+(S.cmd.x-startTip[0])*e;
+      const y=startTip[1]+(S.cmd.y-startTip[1])*e;
+      const sol=inverse(x,y,S.elbow);
+      if(sol){S.cur.t1=sol[0];S.cur.t2=sol[1];}
+    }else{
+      S.cur.t1=start.t1+(end.t1-start.t1)*e;
+      S.cur.t2=start.t2+(end.t2-start.t2)*e;
+    }
+    S.trail.push(forward(S.cur.t1,S.cur.t2));
+    if(S.trail.length>900)S.trail.shift();
+    draw();
+    if(p<1){ S.anim=requestAnimationFrame(frame); }
+    else{
+      S.anim=null; S.cur={t1:end.t1,t2:end.t2};
+      $("go").classList.remove("busy"); $("go").textContent="▶ Execute move";
+      recompute();
+    }
+  }
+  S.anim=requestAnimationFrame(frame);
+}
+
+// ---------------- wiring ----------------
+["L1","L2","g1","g2","spr","micro","tx","ty","tr","tphi"].forEach(id=>{
+  $(id).addEventListener("input",recompute);
+});
+function segWire(seg,key,fn){
+  $(seg).querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
+    $(seg).querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on"); fn(b); recompute();
+  }));
+}
+segWire("coordSeg","coord",b=>{
+  S.coord=b.dataset.c;
+  $("xyInputs").style.display    = S.coord==="xy"?"flex":"none";
+  $("polarInputs").style.display = S.coord==="polar"?"flex":"none";
+});
+segWire("elbowSeg","elbow",b=>S.elbow=b.dataset.e);
+segWire("modeSeg","mode",b=>S.mode=b.dataset.m);
+segWire("pathSeg","path",b=>S.path=b.dataset.p);
+$("go").addEventListener("click",execute);
+$("home").addEventListener("click",()=>{
+  if(S.anim) return; S.cur={t1:0,t2:0}; S.trail=[]; recompute();
+});
+
+new ResizeObserver(()=>{resize();draw();}).observe(cv);
+window.addEventListener("load",()=>{ resize();
+  // start the live arm at a sensible pose so it isn't folded on the axis
+  S.cur={t1:30*D2R,t2:-60*D2R}; recompute();
+});
+</script>
