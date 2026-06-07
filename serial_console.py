@@ -1,6 +1,6 @@
 """USB serial command console for the fixed SwivelCut arm."""
 
-from scara_arm import ScaraArm
+from swivelcut import SwivelCut
 
 
 HELP = """Commands:
@@ -11,6 +11,10 @@ HELP = """Commands:
   ANGLES <j1> <j2>    move both joints to absolute angles
   XY <x> <y> [UP|DOWN]
                       move the blade to an absolute position in millimetres
+  XYJ1 <x> <y> [UP|DOWN]
+                      solve XY and move only J1
+  XYJ2 <x> <y> [UP|DOWN]
+                      solve XY and move only J2
   CUT <x0> <y0> <x1> <y1> [UP|DOWN]
                       cut a straight Cartesian line
   POS                 print x, y, J1 and J2
@@ -20,9 +24,9 @@ Angles are degrees. Positive angles are counterclockwise viewed from above.
 """
 
 
-class ArmConsole:
+class SwivelCutConsole:
     def __init__(self, arm=None, output=print):
-        self.arm = arm if arm is not None else ScaraArm()
+        self.arm = arm if arm is not None else SwivelCut()
         self.output = output
         self.armed = False
 
@@ -74,10 +78,18 @@ class ArmConsole:
             self._print_position()
         elif command == "XY":
             self._require_armed()
-            if len(parts) not in (3, 4):
-                raise ValueError("use XY <x> <y> [UP|DOWN]")
-            elbow = self._elbow(parts[3]) if len(parts) == 4 else "up"
-            self.arm.move_to_xy(float(parts[1]), float(parts[2]), elbow)
+            x, y, elbow = self._xy_args(parts, "XY")
+            self.arm.move_to_xy(x, y, elbow)
+            self._print_position()
+        elif command == "XYJ1":
+            self._require_armed()
+            x, y, elbow = self._xy_args(parts, "XYJ1")
+            self.arm.move_joint_to_xy(1, x, y, elbow)
+            self._print_position()
+        elif command == "XYJ2":
+            self._require_armed()
+            x, y, elbow = self._xy_args(parts, "XYJ2")
+            self.arm.move_joint_to_xy(2, x, y, elbow)
             self._print_position()
         elif command == "CUT":
             self._require_armed()
@@ -97,6 +109,12 @@ class ArmConsole:
         if len(parts) != count:
             raise ValueError("use " + usage)
 
+    def _xy_args(self, parts, command):
+        if len(parts) not in (3, 4):
+            raise ValueError("use {} <x> <y> [UP|DOWN]".format(command))
+        elbow = self._elbow(parts[3]) if len(parts) == 4 else "up"
+        return float(parts[1]), float(parts[2]), elbow
+
     def _print_position(self):
         x, y, t1, t2 = self.arm.position()
         self.output(
@@ -109,7 +127,7 @@ class ArmConsole:
 
 
 def run_console():
-    console = ArmConsole()
+    console = SwivelCutConsole()
     print("SwivelCut USB console")
     print("Physically fold the arm, then type: ARM FOLDED")
     print("Type HELP for all commands.")
@@ -123,4 +141,3 @@ def run_console():
         print("\nEmergency stop: drivers disabled")
     finally:
         console.shutdown()
-

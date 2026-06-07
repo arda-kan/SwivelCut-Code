@@ -1,6 +1,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>2-DOF Arm · Motion Visualizer</title>
+<title>SwivelCut Motion Visualizer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -26,7 +26,7 @@
         padding:18px;max-width:1500px;margin:0 auto}
   @media(max-width:880px){.wrap{grid-template-columns:1fr}}
 
-  /* ---- masthead ---- */
+  /* Header */
   .head{grid-column:1/-1;display:flex;align-items:baseline;gap:14px;
         border-bottom:1px solid var(--edge);padding-bottom:12px;flex-wrap:wrap}
   .head h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;
@@ -39,7 +39,7 @@
        animation:pulse 2.4s infinite}
   @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
 
-  /* ---- panels ---- */
+  /* Controls */
   .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));
          border:1px solid var(--edge);border-radius:12px;padding:14px}
   .controls{display:flex;flex-direction:column;gap:14px}
@@ -58,7 +58,7 @@
   .field input:focus,.field select:focus{border-color:var(--cyan);
     box-shadow:0 0 0 2px rgba(51,227,207,.12)}
 
-  /* segmented toggles */
+  /* Toggle buttons */
   .seg{display:flex;border:1px solid var(--edge);border-radius:8px;overflow:hidden}
   .seg button{flex:1;background:transparent;color:var(--dim);border:0;
     padding:8px 4px;font-family:"JetBrains Mono",monospace;font-size:11.5px;
@@ -79,7 +79,7 @@
       font-size:12px;cursor:pointer;width:100%;margin-top:8px}
   .ghostbtn:hover{border-color:var(--cyan);color:var(--txt)}
 
-  /* ---- stage ---- */
+  /* Canvas */
   .stage{position:relative;border:1px solid var(--edge);border-radius:12px;
          background:#050809;overflow:hidden;min-height:440px}
   canvas{display:block;width:100%;height:100%}
@@ -88,7 +88,7 @@
   .err{position:absolute;top:12px;right:14px;font-size:11px;letter-spacing:1px;
        color:var(--red);text-transform:uppercase;display:none}
 
-  /* ---- telemetry ---- */
+  /* Readout */
   .telem{grid-column:1/-1;display:grid;
          grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
   .cell{background:linear-gradient(180deg,var(--panel),var(--panel2));
@@ -105,12 +105,12 @@
 
 <div class="wrap">
   <div class="head">
-    <h1>SCARA<b>·</b>SCOPE</h1>
+    <h1>SWIVEL<b>·</b>CUT</h1>
     <span style="color:var(--dim);font-size:12px">2-DOF planar motion visualizer</span>
     <span class="sub"><span class="dot"></span>cardboard cutter · joint-space &amp; IK</span>
   </div>
 
-  <!-- ============ CONTROLS ============ -->
+  <!-- Controls -->
   <div class="panel controls">
     <div class="grp">
       <h2>Fixed machine</h2>
@@ -165,14 +165,14 @@
     </div>
   </div>
 
-  <!-- ============ STAGE ============ -->
+  <!-- Motion view -->
   <div class="stage">
     <canvas id="cv"></canvas>
     <div class="badge" id="badge">workspace · 0–400 mm</div>
     <div class="err" id="err">⚠ target out of range</div>
   </div>
 
-  <!-- ============ TELEMETRY ============ -->
+  <!-- Position and motor data -->
   <div class="telem" id="telem">
     <div class="cell"><div class="k">θ1 shoulder</div><div class="v a" id="o_t1">0.0<span class="u">°</span></div></div>
     <div class="cell"><div class="k">θ2 elbow</div><div class="v c" id="o_t2">0.0<span class="u">°</span></div></div>
@@ -196,7 +196,7 @@
 const $ = id => document.getElementById(id);
 const TAU = Math.PI*2, D2R = Math.PI/180, R2D = 180/Math.PI;
 
-// ---------------- state ----------------
+// State
 const S = {
   L1:200, L2:200, g1:6, g2:9, spr:200, micro:32,
   coord:"xy", elbow:"up", mode:"both", path:"rapid",
@@ -205,7 +205,7 @@ const S = {
   trail:[], anim:null
 };
 
-// ---------------- kinematics ----------------
+// Kinematics
 function forward(t1,t2){
   return [ S.L1*Math.cos(t1)+S.L2*Math.cos(t1+t2),
            S.L1*Math.sin(t1)+S.L2*Math.sin(t1+t2) ];
@@ -222,7 +222,7 @@ function inverse(x,y,elbow){
 }
 const stepsPerRad = g => S.spr*S.micro*g/TAU;
 
-// ---------------- read inputs ----------------
+// Target input
 function targetXY(){
   if(S.coord==="xy") return [ +$("tx").value, +$("ty").value ];
   const r=+$("tr").value, p=(+$("tphi").value)*D2R;
@@ -237,7 +237,7 @@ function recompute(){
   updateTelemetry(); draw();
 }
 
-// what the chosen MODE will actually drive to (joint-only modes hold the other)
+// Joint-only modes hold the other joint.
 function achievedPose(){
   if(!S.cmd.ok) return {t1:S.cur.t1, t2:S.cur.t2};
   if(S.mode==="j1") return {t1:S.cmd.t1, t2:S.cur.t2};
@@ -245,7 +245,7 @@ function achievedPose(){
   return {t1:S.cmd.t1, t2:S.cmd.t2};
 }
 
-// ---------------- telemetry ----------------
+// Readout
 function fmt(n,d=1){return (n>=0?"":"")+n.toFixed(d);}
 function updateTelemetry(){
   const tgt=achievedPose();
@@ -267,7 +267,7 @@ function updateTelemetry(){
   $("badge").textContent = `workspace · ${Math.abs(S.L1-S.L2).toFixed(0)}–${(S.L1+S.L2).toFixed(0)} mm`;
 }
 
-// ---------------- canvas ----------------
+// Drawing
 const cv=$("cv"), ctx=cv.getContext("2d");
 let DPR=1, W=0, H=0, scale=1, ox=0, oy=0;
 function resize(){
@@ -302,7 +302,7 @@ function draw(){
     [gy,-gy].forEach(v=>{ctx.beginPath();ctx.moveTo(0,sy(v));ctx.lineTo(W,sy(v));ctx.stroke();});
   }
 
-  // reachable annulus
+  // Reachable area
   const Ro=(S.L1+S.L2)*scale, Ri=Math.abs(S.L1-S.L2)*scale;
   ctx.beginPath(); ctx.arc(ox,oy,Ro,0,TAU);
   ctx.fillStyle="rgba(51,227,207,.045)"; ctx.fill();
@@ -329,11 +329,11 @@ function draw(){
     }
   }
 
-  // ghost = commanded pose (where this move ends)
+  // Commanded end pose
   const tgt=achievedPose();
   if(S.cmd.ok){ drawArm(tgt.t1,tgt.t2,"#5d7d80","#5d7d80",true); }
 
-  // target marker
+  // Target
   if(S.cmd.ok){
     const X=sx(S.cmd.x), Y=sy(S.cmd.y);
     ctx.strokeStyle=cs.getPropertyValue('--target'); ctx.lineWidth=1.6;
@@ -342,7 +342,7 @@ function draw(){
     ctx.beginPath();ctx.arc(X,Y,6,0,TAU);ctx.stroke();
   }
 
-  // live arm (current pose)
+  // Current pose
   drawArm(S.cur.t1,S.cur.t2,
     cs.getPropertyValue('--link1'), cs.getPropertyValue('--link2'), false);
 
@@ -366,7 +366,7 @@ function drawArm(t1,t2,c1,c2,ghost){
   // joints
   joint(sx(0),sy(0), "#0b1112", c1, 9);
   joint(sx(ex),sy(ey), "#0b1112", c2, 8);
-  // tip / blade
+  // Blade point
   ctx.fillStyle="#050809"; ctx.strokeStyle=c2; ctx.lineWidth=2.5;
   ctx.beginPath();ctx.arc(sx(tx),sy(ty),5,0,TAU);ctx.fill();ctx.stroke();
 }
@@ -375,8 +375,8 @@ function joint(x,y,fill,ring,r){
   ctx.beginPath();ctx.arc(x,y,r,0,TAU);ctx.fill();ctx.stroke();
 }
 
-// ---------------- animation ----------------
-function easeTrap(t){            // accel / cruise / decel-ish profile
+// Animation
+function easeTrap(t){
   const a=0.28;
   if(t<a)        return (t*t)/(2*a*(1-a));
   if(t<1-a)      return (t-a/2)/(1-a);
@@ -436,7 +436,7 @@ function execute(){
   S.anim=requestAnimationFrame(frame);
 }
 
-// ---------------- wiring ----------------
+// Events
 ["tx","ty","tr","tphi"].forEach(id=>{
   $(id).addEventListener("input",recompute);
 });

@@ -2,7 +2,7 @@ const assert = require("assert");
 const fs = require("fs");
 const vm = require("vm");
 
-const html = fs.readFileSync("arm_visualizer.html", "utf8");
+const html = fs.readFileSync("swivelcut_visualizer.html", "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 const elements = new Map();

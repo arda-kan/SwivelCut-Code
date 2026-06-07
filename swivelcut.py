@@ -1,109 +1,60 @@
-"""
-scara_arm.py  --  2-DOF planar (SCARA-style) cardboard-cutting arm controller
-================================================================================
-Target : ESP32 (FREENOVE ESP32-WROOM) running MicroPython
-Drives : 2x NEMA-17 steppers -> 2 rotary joints via timing-belt PULLEY reductions
-         (no gearbox)
-
-         Joint 1  shoulder  (link1 vs. base ) : reduction GEAR_J1  (default 6:1)
-         Joint 2  elbow     (link2 vs. link1) : reduction GEAR_J2  (default 9:1)
-
-Everything that describes the machine lives in the CONFIG block, so link
-lengths, pulley ratios, microstepping, speeds, limits and pins are all tuned
-in one place.
-
-Conventions
------------
-  theta1 : shoulder angle, link1 measured from the +X base axis      (rad/deg)
-  theta2 : elbow angle, link2 measured RELATIVE to link1             (rad/deg)
-  +angle : counter-clockwise looking down on the cutting plane
-  tip    : (x, y) = L1.cos t1 + L2.cos(t1+t2) , L1.sin t1 + L2.sin(t1+t2)
-
-API (see demo() at the bottom for a worked example)
-----------------------------------------------------
-  arm = ScaraArm()
-  arm.enable()
-  # Power on with the arm physically folded; startup state is J1=0, J2=180.
-  arm.move_joint(1, 30)          # JOINT-1 ONLY  -> shoulder to 30 deg
-  arm.move_joint(2, -45)         # JOINT-2 ONLY  -> elbow to -45 deg
-  arm.move_joint(1, 10, relative=True)
-  arm.move_to_angles(30, -45)    # BOTH joints, coordinated single move
-  arm.move_to_xy(180, 120)       # inverse-kinematics move to a Cartesian point
-  arm.cut_line(0, 150, 200, 150) # straight Cartesian segment (tip follows a line)
-  print(arm.position())          # (x, y, t1_deg, t2_deg)
-  arm.disable()
-"""
+"""SwivelCut two-joint motion controller for MicroPython on ESP32."""
 
 import math
 from machine import Pin
 from time import sleep_us, ticks_us, ticks_diff, ticks_add
 
-# =============================================================================
-#  FIXED MACHINE DEFINITION
-# =============================================================================
-
-# ---- Geometry (mm, axis-to-axis link lengths) -------------------------------
+# Machine dimensions and drive ratios
 L1 = 200.0          # shoulder pivot -> elbow pivot
 L2 = 200.0          # elbow pivot -> cutting tip
 
-# ---- Drivetrain -------------------------------------------------------------
 STEPS_PER_MOTOR_REV = 200      # 1.8-degree NEMA 23 and NEMA 17 motors
 MICROSTEP = 32                 # TB6600 DIP switches must also be set to 32
 GEAR_J1 = 6.0                  # motor turns per shoulder revolution
 GEAR_J2 = 9.0                  # motor turns per elbow revolution
 
-# Motor 2 is mounted on link 1, so the two joints are mechanically independent.
 COUPLING = 0.0
 
-# The arm must physically be in this pose whenever the controller starts.
+# Known pose at power-on
 START_T1_DEG = 0.0
 START_T2_DEG = 180.0
 FOLDED_RADIUS_MM = 1.0
 
-# Per-axis direction sign. Flip if a joint drives the wrong way.
+# Set either value to True if that joint runs backwards.
 INVERT_J1 = False
 INVERT_J2 = False
 
-# ---- Motion profile (units = MICROSTEPS, on the dominant/major axis) --------
+# Motion timing
 MAX_STEP_RATE = 5000.0         # cruise ceiling [microsteps / s]
 ACCEL = 12000.0                # acceleration [microsteps / s^2]
 PULSE_US = 10                  # conservative pulse width for TB6600 inputs
 DIR_SETUP_US = 10              # direction setup time before the first pulse
 
-# ---- Soft joint limits (deg). Moves outside these raise ValueError ----------
+# Software travel limits
 J1_MIN, J1_MAX = -180.0, 180.0
 J2_MIN, J2_MAX = -180.0, 180.0
 
-# ---- Pin map (ESP32-WROOM; avoids input-only 34/35/36/39 & boot-strap pins) -
+# ESP32 pins
 PIN_J1_STEP = 25
 PIN_J1_DIR  = 26
 PIN_J2_STEP = 32
 PIN_J2_DIR  = 33
 PIN_ENABLE  = 27               # shared /EN, active-LOW. Set to None if unused.
 
-# ---- Cartesian line cutting -------------------------------------------------
 LINE_SEG_MM = 2.0              # straight cuts are split into segments this long
 
-
-# =============================================================================
-#  Derived constants
-# =============================================================================
 TWO_PI = 2.0 * math.pi
-# microsteps produced at the JOINT OUTPUT per radian of joint rotation
 STEPS_PER_RAD_J1 = STEPS_PER_MOTOR_REV * MICROSTEP * GEAR_J1 / TWO_PI
 STEPS_PER_RAD_J2 = STEPS_PER_MOTOR_REV * MICROSTEP * GEAR_J2 / TWO_PI
 
 
-# =============================================================================
-#  Low-level stepper axis
-# =============================================================================
 class StepperAxis:
     def __init__(self, step_pin, dir_pin, steps_per_rad, invert=False):
         self.step = Pin(step_pin, Pin.OUT, value=0)
         self.dir  = Pin(dir_pin, Pin.OUT, value=0)
         self.steps_per_rad = steps_per_rad
         self.invert = invert
-        self.pos = 0                       # current position, signed microsteps
+        self.pos = 0
 
     def set_dir(self, sign):
         forward = (sign > 0)
@@ -112,10 +63,7 @@ class StepperAxis:
         self.dir.value(1 if forward else 0)
 
 
-# =============================================================================
-#  The arm
-# =============================================================================
-class ScaraArm:
+class SwivelCut:
     def __init__(self):
         self.j1 = StepperAxis(PIN_J1_STEP, PIN_J1_DIR, STEPS_PER_RAD_J1, INVERT_J1)
         self.j2 = StepperAxis(PIN_J2_STEP, PIN_J2_DIR, STEPS_PER_RAD_J2, INVERT_J2)
@@ -123,20 +71,17 @@ class ScaraArm:
         self.L1 = L1
         self.L2 = L2
         self.coupling = COUPLING
-        # No encoders yet: software position is valid only if startup is folded.
         self.set_folded_start()
 
-    # ------------------------------------------------------------------ power
     def enable(self):
         if self.en:
-            self.en.value(0)               # active-LOW
+            self.en.value(0)
         sleep_us(2000)
 
     def disable(self):
         if self.en:
             self.en.value(1)
 
-    # ----------------------------------------------------------- kinematics
     def forward(self, t1, t2):
         """Joint angles (rad) -> tip (x, y) mm."""
         x = self.L1 * math.cos(t1) + self.L2 * math.cos(t1 + t2)
@@ -178,7 +123,6 @@ class ScaraArm:
         nearest_r = math.sqrt(nearest_x * nearest_x + nearest_y * nearest_y)
         return nearest_r + 1e-9 >= abs(self.L1 - self.L2)
 
-    # -------------------------------------------------------- step accounting
     def _angle_to_steps(self, t1, t2):
         s1 = round(t1 * self.j1.steps_per_rad)
         s2 = round((t2 + self.coupling * t1) * self.j2.steps_per_rad)
@@ -213,7 +157,6 @@ class ScaraArm:
         x, y = self.forward(self.t1, self.t2)
         return x, y, math.degrees(self.t1), math.degrees(self.t2)
 
-    # ----------------------------------------------------------- public moves
     def move_to_angles(self, t1_deg, t2_deg, ramp_in=True, ramp_out=True):
         """Coordinated move of BOTH joints to absolute angles (deg)."""
         self._validate_angles(t1_deg, t2_deg)
@@ -225,13 +168,10 @@ class ScaraArm:
         try:
             self._execute(d1, d2, ramp_in, ramp_out)
         finally:
-            # Also runs after Ctrl-C or a hardware exception, so software state
-            # remains aligned with every pulse that was actually emitted.
             self._sync_angles_from_steps()
 
     def move_joint(self, joint, angle_deg, relative=False):
-        """Move ONE joint only (1 = shoulder, 2 = elbow). The other holds.
-        The other joint remains at its current angle."""
+        """Move one joint and hold the other."""
         if joint == 1:
             t1d = math.degrees(self.t1) + angle_deg if relative else angle_deg
             self.move_to_angles(t1d, math.degrees(self.t2))
@@ -246,11 +186,18 @@ class ScaraArm:
         t1, t2 = self.inverse(x, y, elbow)
         self.move_to_angles(math.degrees(t1), math.degrees(t2))
 
+    def move_joint_to_xy(self, joint, x, y, elbow="up"):
+        """Use an XY solution for one joint and hold the other joint still."""
+        if joint not in (1, 2):
+            raise ValueError("joint must be 1 or 2")
+        t1, t2 = self.inverse(x, y, elbow)
+        if joint == 1:
+            self.move_to_angles(math.degrees(t1), math.degrees(self.t2))
+        else:
+            self.move_to_angles(math.degrees(self.t1), math.degrees(t2))
+
     def cut_line(self, x0, y0, x1, y1, elbow="up", seg_mm=LINE_SEG_MM):
-        """Move the tip along a STRAIGHT Cartesian line from (x0,y0)->(x1,y1).
-        The path is split into short joint-space segments; the arm ramps up on
-        the first, cruises through the middle and ramps down on the last so the
-        cut is continuous rather than stop-start at every segment."""
+        """Move the blade along a straight XY line."""
         if seg_mm <= 0:
             raise ValueError("seg_mm must be greater than zero")
         current_x, current_y = self.forward(self.t1, self.t2)
@@ -261,8 +208,7 @@ class ScaraArm:
         dist = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
         n = max(1, int(math.ceil(dist / seg_mm)))
 
-        # Validate the complete line before emitting any step. This matters when
-        # unequal links create an unreachable hole inside the outer reach disk.
+        # Check every segment before the motors move.
         for i in range(n + 1):
             f = i / float(n)
             xi = x0 + (x1 - x0) * f
@@ -281,11 +227,8 @@ class ScaraArm:
             self.move_to_angles(math.degrees(t1), math.degrees(t2),
                                 ramp_in=ramp_in, ramp_out=ramp_out)
 
-    # --------------------------------------------------- coordinated executor
     def _execute(self, d1, d2, ramp_in=True, ramp_out=True):
-        """Coordinated 2-axis move of signed microstep deltas (d1, d2) using a
-        Bresenham interpolator keyed on the major axis and an Austin-style
-        trapezoidal velocity profile."""
+        """Send a coordinated pair of step counts to the drivers."""
         s1 = 1 if d1 >= 0 else -1
         s2 = 1 if d2 >= 0 else -1
         n1 = abs(d1)
@@ -302,13 +245,12 @@ class ScaraArm:
         minor = n2 if major_is_1 else n1
         err = total // 2
 
-        # --- velocity profile setup (intervals in microseconds) -------------
         min_interval = 1.0e6 / MAX_STEP_RATE
         c0 = 0.676 * 1.0e6 * math.sqrt(2.0 / ACCEL)        # first-step interval
         n_ramp = int((MAX_STEP_RATE * MAX_STEP_RATE) / (2.0 * ACCEL))
         n_acc = n_ramp if ramp_in else 0
         n_dec = n_ramp if ramp_out else 0
-        if n_acc + n_dec > total:                           # triangular profile
+        if n_acc + n_dec > total:
             if ramp_in and ramp_out:
                 n_acc = total // 2
                 n_dec = total - n_acc
@@ -324,7 +266,8 @@ class ScaraArm:
 
         t_next = ticks_us()
         for i in range(total):
-            # Bresenham: major axis steps every tick; minor when error rolls
+            # The major axis steps every cycle. Error tracking spaces out the
+            # minor-axis steps so both joints finish together.
             do2 = False
             if major_is_1:
                 do1 = True
@@ -340,10 +283,6 @@ class ScaraArm:
                     err += total
                 else:
                     do1 = False
-            if not major_is_1 and not do1:
-                pass
-
-            # ---- emit simultaneous pulse ----
             if major_is_1:
                 step1.value(1)
                 if do2:
@@ -356,7 +295,6 @@ class ScaraArm:
             step1.value(0)
             step2.value(0)
 
-            # ---- bookkeeping ----
             if major_is_1:
                 self.j1.pos += s1
                 if do2:
@@ -366,12 +304,10 @@ class ScaraArm:
                 if do1:
                     self.j1.pos += s1
 
-            # ---- wait out the rest of this tick interval ----
             t_next = ticks_add(t_next, int(c))
             while ticks_diff(ticks_us(), t_next) < 0:
                 pass
 
-            # ---- advance the velocity profile ----
             if i < n_acc:
                 ramp += 1
                 c = c - (2.0 * c) / (4.0 * ramp + 1.0)
@@ -384,9 +320,6 @@ class ScaraArm:
                 c = min_interval
 
 
-# =============================================================================
-#  Optional: two-button manual jog (green / yellow buttons on the breadboard)
-# =============================================================================
 def jog_with_buttons(arm, pin_a=4, pin_b=16, step_deg=1.0):
     """Hold a button to jog a joint. Wire each button to GND with internal
     pull-ups (button A -> joint 1, button B -> joint 2). Ctrl-C to stop."""
@@ -408,11 +341,8 @@ def jog_with_buttons(arm, pin_a=4, pin_b=16, step_deg=1.0):
         arm.disable()
 
 
-# =============================================================================
-#  Worked example (call demo() from the REPL -- it does NOT run on import)
-# =============================================================================
 def demo():
-    arm = ScaraArm()
+    arm = SwivelCut()
     arm.enable()
     try:
         print("start :", arm.position())
@@ -436,6 +366,5 @@ def demo():
 
 
 if __name__ == "__main__":
-    # Safety: do nothing automatically. Uncomment to auto-run the demo.
     # demo()
     pass

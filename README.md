@@ -1,7 +1,6 @@
 # SwivelCut Code
 
-Controller and motion visualizer for a two-joint planar SCARA-style cardboard
-cutting arm.
+Controller and motion visualizer for the two-joint SwivelCut cardboard cutter.
 
 ## Fixed machine
 
@@ -35,11 +34,10 @@ joint clockwise for a positive command.
 
 ## Files
 
-- `scara_arm.py`: MicroPython controller for an ESP32 and two stepper axes.
+- `swivelcut.py`: MicroPython controller for an ESP32 and two stepper axes.
 - `serial_console.py`: guarded USB serial command parser.
 - `main.py`: starts the serial console automatically when the ESP32 boots.
-- `arm_visualizer.html`: standalone browser visualizer for geometry, IK, and
-  joint motion.
+- `swivelcut_visualizer.html`: browser visualizer for geometry, IK, and motion.
 
 ## Running it on the ESP32
 
@@ -99,7 +97,7 @@ python3 -m esptool --chip esp32 write-flash 0x1000 firmware.bin
 Run this from the repository directory:
 
 ```sh
-python3 -m mpremote connect auto fs cp scara_arm.py :scara_arm.py
+python3 -m mpremote connect auto fs cp swivelcut.py :swivelcut.py
 python3 -m mpremote connect auto fs cp serial_console.py :serial_console.py
 python3 -m mpremote connect auto fs cp main.py :main.py
 python3 -m mpremote connect auto reset
@@ -135,7 +133,7 @@ J2 180
 
 If a positive command turns a joint clockwise rather than counterclockwise,
 disconnect motor power and change that joint's `INVERT_J1` or `INVERT_J2`
-setting in `scara_arm.py`, upload the file again, and reset.
+setting in `swivelcut.py`, upload the file again, and reset.
 
 ### 8. Normal commands
 
@@ -145,6 +143,8 @@ J1 -20
 J2 90
 XY 200 100
 XY 200 100 DOWN
+XYJ1 200 100
+XYJ2 200 100 DOWN
 CUT 100 100 250 100
 POS
 DISARM
@@ -153,9 +153,10 @@ HELP
 
 Angles are absolute degrees, not relative movements. `ANGLES 30 120` means
 "move J1 to +30 degrees and J2 to +120 degrees." `XY` values are absolute
-millimetres from the shoulder pivot. Before `CUT`, move to a safely unfolded
-starting position; the controller then moves to the line's first point and
-follows the requested straight segment.
+millimetres from the shoulder pivot. `XYJ1` and `XYJ2` calculate the normal XY
+solution but move only the named joint. Because the other joint stays still,
+the blade will usually not finish at the requested XY point. Before `CUT`, move
+to a safely unfolded starting position.
 
 Pressing `Ctrl-C` while connected stops the Python program and disables the
 drivers through the console cleanup handler. Cutting motor power with the
@@ -167,5 +168,5 @@ The controller's hardware imports are replaced with small test doubles:
 
 ```sh
 python3 -m unittest discover -s tests -v
-node tests/test_visualizer.js
+node tests/test_swivelcut_visualizer.js
 ```

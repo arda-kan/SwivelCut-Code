@@ -33,12 +33,12 @@ time.ticks_us = lambda: 0
 time.ticks_diff = lambda first, second: first - second
 time.ticks_add = lambda value, delta: value + delta
 
-scara_arm = importlib.import_module("scara_arm")
+swivelcut = importlib.import_module("swivelcut")
 
 
-class ScaraArmTests(unittest.TestCase):
+class SwivelCutTests(unittest.TestCase):
     def test_startup_state_is_folded(self):
-        arm = scara_arm.ScaraArm()
+        arm = swivelcut.SwivelCut()
 
         x, y, t1, t2 = arm.position()
 
@@ -48,18 +48,18 @@ class ScaraArmTests(unittest.TestCase):
         self.assertAlmostEqual(t2, 180.0)
 
     def test_inverse_normalizes_equivalent_shoulder_angle(self):
-        arm = scara_arm.ScaraArm()
+        arm = swivelcut.SwivelCut()
 
         t1, t2 = arm.inverse(-300, -1, elbow="up")
 
-        self.assertGreaterEqual(math.degrees(t1), scara_arm.J1_MIN)
-        self.assertLessEqual(math.degrees(t1), scara_arm.J1_MAX)
+        self.assertGreaterEqual(math.degrees(t1), swivelcut.J1_MIN)
+        self.assertLessEqual(math.degrees(t1), swivelcut.J1_MAX)
         x, y = arm.forward(t1, t2)
         self.assertAlmostEqual(x, -300, places=6)
         self.assertAlmostEqual(y, -1, places=6)
 
     def test_line_crossing_inner_hole_is_rejected_before_motion(self):
-        arm = scara_arm.ScaraArm()
+        arm = swivelcut.SwivelCut()
         arm.L1 = 500
         arm.L2 = 100
         moves = []
@@ -72,7 +72,7 @@ class ScaraArmTests(unittest.TestCase):
         self.assertEqual(moves, [])
 
     def test_interrupted_move_resynchronizes_joint_angles(self):
-        arm = scara_arm.ScaraArm()
+        arm = swivelcut.SwivelCut()
 
         def interrupted_execute(_d1, _d2, _ramp_in, _ramp_out):
             arm.j1.pos = 100
@@ -90,14 +90,40 @@ class ScaraArmTests(unittest.TestCase):
         self.assertAlmostEqual(arm.t1, expected_t1)
         self.assertAlmostEqual(arm.t2, expected_t2)
 
+    def test_xy_can_move_only_j1(self):
+        arm = swivelcut.SwivelCut()
+        arm.t1 = math.radians(10)
+        arm.t2 = math.radians(120)
+        moves = []
+        arm.move_to_angles = lambda t1, t2: moves.append((t1, t2))
+        solved_t1, _ = arm.inverse(200, 100, "up")
+
+        arm.move_joint_to_xy(1, 200, 100, "up")
+
+        self.assertAlmostEqual(moves[0][0], math.degrees(solved_t1))
+        self.assertAlmostEqual(moves[0][1], 120)
+
+    def test_xy_can_move_only_j2(self):
+        arm = swivelcut.SwivelCut()
+        arm.t1 = math.radians(10)
+        arm.t2 = math.radians(120)
+        moves = []
+        arm.move_to_angles = lambda t1, t2: moves.append((t1, t2))
+        _, solved_t2 = arm.inverse(200, 100, "down")
+
+        arm.move_joint_to_xy(2, 200, 100, "down")
+
+        self.assertAlmostEqual(moves[0][0], 10)
+        self.assertAlmostEqual(moves[0][1], math.degrees(solved_t2))
+
     def test_cut_line_rejects_nonpositive_segment_length(self):
-        arm = scara_arm.ScaraArm()
+        arm = swivelcut.SwivelCut()
 
         with self.assertRaisesRegex(ValueError, "greater than zero"):
             arm.cut_line(100, 100, 200, 100, seg_mm=0)
 
     def test_straight_cut_requires_unfolding_first(self):
-        arm = scara_arm.ScaraArm()
+        arm = swivelcut.SwivelCut()
 
         with self.assertRaisesRegex(ValueError, "unfold"):
             arm.cut_line(100, 100, 200, 100)

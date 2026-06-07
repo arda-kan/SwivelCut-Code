@@ -6,9 +6,9 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# test_scara_arm installs the desktop machine/time substitutes before import.
-import test_scara_arm  # noqa: F401
-from serial_console import ArmConsole
+# test_swivelcut installs desktop substitutes for the MicroPython modules.
+import test_swivelcut  # noqa: F401
+from serial_console import SwivelCutConsole
 
 
 class FakeArm:
@@ -37,6 +37,9 @@ class FakeArm:
     def move_to_xy(self, x, y, elbow):
         self.calls.append(("xy", x, y, elbow))
 
+    def move_joint_to_xy(self, joint, x, y, elbow):
+        self.calls.append(("xy_joint", joint, x, y, elbow))
+
     def cut_line(self, x0, y0, x1, y1, elbow):
         self.calls.append(("cut", x0, y0, x1, y1, elbow))
 
@@ -44,11 +47,11 @@ class FakeArm:
         return self.pose
 
 
-class ArmConsoleTests(unittest.TestCase):
+class SwivelCutConsoleTests(unittest.TestCase):
     def setUp(self):
         self.arm = FakeArm()
         self.output = []
-        self.console = ArmConsole(self.arm, self.output.append)
+        self.console = SwivelCutConsole(self.arm, self.output.append)
 
     def test_motion_is_rejected_until_folded_pose_is_confirmed(self):
         with self.assertRaisesRegex(ValueError, "ARM FOLDED"):
@@ -68,12 +71,16 @@ class ArmConsoleTests(unittest.TestCase):
         self.console.execute("J2 -45")
         self.console.execute("ANGLES 20 120")
         self.console.execute("XY 200 100 DOWN")
+        self.console.execute("XYJ1 150 100 UP")
+        self.console.execute("XYJ2 150 100 DOWN")
         self.console.execute("CUT 100 100 250 100 UP")
 
         self.assertIn(("joint", 1, 30.0), self.arm.calls)
         self.assertIn(("joint", 2, -45.0), self.arm.calls)
         self.assertIn(("angles", 20.0, 120.0), self.arm.calls)
         self.assertIn(("xy", 200.0, 100.0, "down"), self.arm.calls)
+        self.assertIn(("xy_joint", 1, 150.0, 100.0, "up"), self.arm.calls)
+        self.assertIn(("xy_joint", 2, 150.0, 100.0, "down"), self.arm.calls)
         self.assertIn(("cut", 100.0, 100.0, 250.0, 100.0, "up"), self.arm.calls)
 
     def test_shutdown_disables_drivers(self):
