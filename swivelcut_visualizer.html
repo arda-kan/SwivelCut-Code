@@ -131,8 +131,8 @@
         <button data-c="polar">POLAR&nbsp;r·φ</button>
       </div>
       <div class="row" id="xyInputs">
-        <div class="field"><label>X (mm)</label><input id="tx" type="number" value="300" step="5"></div>
-        <div class="field"><label>Y (mm)</label><input id="ty" type="number" value="180" step="5"></div>
+        <div class="field"><label>X sideways (mm)</label><input id="tx" type="number" value="0" step="5"></div>
+        <div class="field"><label>Y forward (mm)</label><input id="ty" type="number" value="300" step="5"></div>
       </div>
       <div class="row" id="polarInputs" style="display:none">
         <div class="field"><label>r (mm)</label><input id="tr" type="number" value="350" step="5"></div>
@@ -199,6 +199,7 @@ const TAU = Math.PI*2, D2R = Math.PI/180, R2D = 180/Math.PI;
 // State
 const S = {
   L1:200, L2:200, g1:6, g2:9, spr:200, micro:32,
+  j1Min:-90*D2R, j1Max:90*D2R, j2Min:-180*D2R, j2Max:180*D2R,
   coord:"xy", elbow:"up", mode:"both", path:"rapid",
   cur:{t1:0, t2:Math.PI},       // required folded startup pose
   cmd:{t1:0, t2:0, ok:false},  // commanded/target pose from inputs
@@ -207,8 +208,9 @@ const S = {
 
 // Kinematics
 function forward(t1,t2){
-  return [ S.L1*Math.cos(t1)+S.L2*Math.cos(t1+t2),
-           S.L1*Math.sin(t1)+S.L2*Math.sin(t1+t2) ];
+  const forward=S.L1*Math.cos(t1)+S.L2*Math.cos(t1+t2);
+  const sideways=S.L1*Math.sin(t1)+S.L2*Math.sin(t1+t2);
+  return [sideways,forward];
 }
 function inverse(x,y,elbow){
   const r2=x*x+y*y;
@@ -217,7 +219,7 @@ function inverse(x,y,elbow){
   c2=Math.max(-1,Math.min(1,c2));
   let s2=Math.sqrt(1-c2*c2); if(elbow==="down") s2=-s2;
   const t2=Math.atan2(s2,c2);
-  const t1=Math.atan2(y,x)-Math.atan2(S.L2*s2, S.L1+S.L2*c2);
+  const t1=Math.atan2(x,y)-Math.atan2(S.L2*s2, S.L1+S.L2*c2);
   return [t1,t2];
 }
 const stepsPerRad = g => S.spr*S.micro*g/TAU;
@@ -226,13 +228,15 @@ const stepsPerRad = g => S.spr*S.micro*g/TAU;
 function targetXY(){
   if(S.coord==="xy") return [ +$("tx").value, +$("ty").value ];
   const r=+$("tr").value, p=(+$("tphi").value)*D2R;
-  return [ r*Math.cos(p), r*Math.sin(p) ];
+  return [ r*Math.sin(p), r*Math.cos(p) ];
 }
 function recompute(){
   const [x,y]=targetXY();
   const sol=inverse(x,y,S.elbow);
-  if(sol){ S.cmd.t1=sol[0]; S.cmd.t2=sol[1]; S.cmd.ok=true; }
-  else   { S.cmd.ok=false; }
+  const withinLimits=sol&&sol[0]>=S.j1Min&&sol[0]<=S.j1Max
+    &&sol[1]>=S.j2Min&&sol[1]<=S.j2Max;
+  if(withinLimits){ S.cmd.t1=sol[0]; S.cmd.t2=sol[1]; S.cmd.ok=true; }
+  else { S.cmd.ok=false; }
   S.cmd.x=x; S.cmd.y=y;
   updateTelemetry(); draw();
 }

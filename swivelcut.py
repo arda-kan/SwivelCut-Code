@@ -25,13 +25,13 @@ INVERT_J1 = False
 INVERT_J2 = False
 
 # Motion timing
-MAX_STEP_RATE = 5000.0         # cruise ceiling [microsteps / s]
-ACCEL = 12000.0                # acceleration [microsteps / s^2]
+MAX_STEP_RATE = 1500.0         # cruise ceiling [microsteps / s]
+ACCEL = 3000.0                 # acceleration [microsteps / s^2]
 PULSE_US = 10                  # conservative pulse width for TB6600 inputs
 DIR_SETUP_US = 10              # direction setup time before the first pulse
 
 # Software travel limits
-J1_MIN, J1_MAX = -180.0, 180.0
+J1_MIN, J1_MAX = -90.0, 90.0
 J2_MIN, J2_MAX = -180.0, 180.0
 
 # ESP32 pins
@@ -50,7 +50,7 @@ STEPS_PER_RAD_J2 = STEPS_PER_MOTOR_REV * MICROSTEP * GEAR_J2 / TWO_PI
 
 class StepperAxis:
     def __init__(self, step_pin, dir_pin, steps_per_rad, invert=False):
-        self.step = Pin(step_pin, Pin.OUT, value=0)
+        self.step = Pin(step_pin, Pin.OUT, value=1)
         self.dir  = Pin(dir_pin, Pin.OUT, value=0)
         self.steps_per_rad = steps_per_rad
         self.invert = invert
@@ -84,9 +84,9 @@ class SwivelCut:
 
     def forward(self, t1, t2):
         """Joint angles (rad) -> tip (x, y) mm."""
-        x = self.L1 * math.cos(t1) + self.L2 * math.cos(t1 + t2)
-        y = self.L1 * math.sin(t1) + self.L2 * math.sin(t1 + t2)
-        return x, y
+        forward = self.L1 * math.cos(t1) + self.L2 * math.cos(t1 + t2)
+        sideways = self.L1 * math.sin(t1) + self.L2 * math.sin(t1 + t2)
+        return sideways, forward
 
     def inverse(self, x, y, elbow="up"):
         """Tip (x, y) mm -> joint angles (t1, t2) rad. Raises if unreachable."""
@@ -100,7 +100,7 @@ class SwivelCut:
         if elbow == "down":
             s2 = -s2
         t2 = math.atan2(s2, c2)
-        t1 = math.atan2(y, x) - math.atan2(L2 * s2, L1 + L2 * c2)
+        t1 = math.atan2(x, y) - math.atan2(L2 * s2, L1 + L2 * c2)
         return self._normalize_angle(t1), self._normalize_angle(t2)
 
     def reachable(self, x, y):
@@ -284,16 +284,16 @@ class SwivelCut:
                 else:
                     do1 = False
             if major_is_1:
-                step1.value(1)
+                step1.value(0)
                 if do2:
-                    step2.value(1)
+                    step2.value(0)
             else:
-                step2.value(1)
+                step2.value(0)
                 if do1:
-                    step1.value(1)
+                    step1.value(0)
             sleep_us(PULSE_US)
-            step1.value(0)
-            step2.value(0)
+            step1.value(1)
+            step2.value(1)
 
             if major_is_1:
                 self.j1.pos += s1
@@ -322,5 +322,4 @@ class SwivelCut:
 
 
 if __name__ == "__main__":
-    # demo()
     pass

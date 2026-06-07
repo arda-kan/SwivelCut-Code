@@ -59,6 +59,19 @@ const sandbox = {
 vm.createContext(sandbox);
 
 const tests = `
+S.L1=200; S.L2=200;
+let straight=forward(0,0);
+assert.ok(Math.abs(straight[0]) < 1e-9);
+assert.ok(Math.abs(straight[1]-400) < 1e-9);
+let straightIK=inverse(0,400,"up");
+assert.ok(Math.abs(straightIK[0]) < 1e-9);
+assert.ok(Math.abs(straightIK[1]) < 1e-9);
+$("tr").value="400"; $("tphi").value="0"; S.coord="polar";
+let polarForward=targetXY();
+assert.ok(Math.abs(polarForward[0]) < 1e-9);
+assert.ok(Math.abs(polarForward[1]-400) < 1e-9);
+S.coord="xy";
+
 S.L1=500; S.L2=100;
 assert.strictEqual(lineReachable(600,0,-600,0), false);
 assert.strictEqual(lineReachable(600,0,500,0), true);

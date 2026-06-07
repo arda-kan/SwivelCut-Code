@@ -47,16 +47,30 @@ class SwivelCutTests(unittest.TestCase):
         self.assertAlmostEqual(t1, 0.0)
         self.assertAlmostEqual(t2, 180.0)
 
-    def test_inverse_normalizes_equivalent_shoulder_angle(self):
+    def test_step_outputs_idle_high(self):
         arm = swivelcut.SwivelCut()
 
-        t1, t2 = arm.inverse(-300, -1, elbow="up")
+        self.assertEqual(arm.j1.step.value(), 1)
+        self.assertEqual(arm.j2.step.value(), 1)
 
-        self.assertGreaterEqual(math.degrees(t1), swivelcut.J1_MIN)
-        self.assertLessEqual(math.degrees(t1), swivelcut.J1_MAX)
+    def test_xy_zero_400_is_straight_ahead(self):
+        arm = swivelcut.SwivelCut()
+
+        t1, t2 = arm.inverse(0, 400, elbow="up")
+
+        self.assertAlmostEqual(math.degrees(t1), 0.0)
+        self.assertAlmostEqual(math.degrees(t2), 0.0)
         x, y = arm.forward(t1, t2)
-        self.assertAlmostEqual(x, -300, places=6)
-        self.assertAlmostEqual(y, -1, places=6)
+        self.assertAlmostEqual(x, 0.0, places=6)
+        self.assertAlmostEqual(y, 400.0, places=6)
+
+    def test_forward_reports_x_sideways_and_y_forward(self):
+        arm = swivelcut.SwivelCut()
+
+        x, y = arm.forward(0, 0)
+
+        self.assertAlmostEqual(x, 0.0, places=6)
+        self.assertAlmostEqual(y, 400.0, places=6)
 
     def test_line_crossing_inner_hole_is_rejected_before_motion(self):
         arm = swivelcut.SwivelCut()
