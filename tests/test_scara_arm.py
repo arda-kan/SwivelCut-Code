@@ -37,6 +37,16 @@ scara_arm = importlib.import_module("scara_arm")
 
 
 class ScaraArmTests(unittest.TestCase):
+    def test_startup_state_is_folded(self):
+        arm = scara_arm.ScaraArm()
+
+        x, y, t1, t2 = arm.position()
+
+        self.assertAlmostEqual(x, 0.0, places=6)
+        self.assertAlmostEqual(y, 0.0, places=6)
+        self.assertAlmostEqual(t1, 0.0)
+        self.assertAlmostEqual(t2, 180.0)
+
     def test_inverse_normalizes_equivalent_shoulder_angle(self):
         arm = scara_arm.ScaraArm()
 
@@ -85,6 +95,12 @@ class ScaraArmTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "greater than zero"):
             arm.cut_line(100, 100, 200, 100, seg_mm=0)
+
+    def test_straight_cut_requires_unfolding_first(self):
+        arm = scara_arm.ScaraArm()
+
+        with self.assertRaisesRegex(ValueError, "unfold"):
+            arm.cut_line(100, 100, 200, 100)
 
 
 if __name__ == "__main__":

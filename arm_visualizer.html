@@ -113,26 +113,14 @@
   <!-- ============ CONTROLS ============ -->
   <div class="panel controls">
     <div class="grp">
-      <h2>Geometry</h2>
+      <h2>Fixed machine</h2>
       <div class="row">
-        <div class="field"><label>Link 1 L1 (mm)</label><input id="L1" type="number" value="300" min="0.001" step="5"></div>
-        <div class="field"><label>Link 2 L2 (mm)</label><input id="L2" type="number" value="300" min="0.001" step="5"></div>
-      </div>
-    </div>
-
-    <div class="grp">
-      <h2>Drivetrain</h2>
-      <div class="row">
-        <div class="field"><label>Pulley J1</label><input id="g1" type="number" value="6" min="0.001" step="1"></div>
-        <div class="field"><label>Pulley J2</label><input id="g2" type="number" value="9" min="0.001" step="1"></div>
+        <div class="field"><label>Links</label><input value="200 / 200 mm" disabled></div>
+        <div class="field"><label>Ratios</label><input value="6:1 / 9:1" disabled></div>
       </div>
       <div class="row" style="margin-top:9px">
-        <div class="field"><label>Steps / rev</label>
-          <select id="spr"><option>200</option><option>400</option></select></div>
-        <div class="field"><label>Microstep</label>
-          <select id="micro"><option>1</option><option>2</option><option>4</option>
-            <option>8</option><option selected>16</option><option>32</option>
-            <option>64</option><option>128</option><option>256</option></select></div>
+        <div class="field"><label>Motors</label><input value="200 steps/rev" disabled></div>
+        <div class="field"><label>TB6600</label><input value="1/32 microstep" disabled></div>
       </div>
     </div>
 
@@ -173,14 +161,14 @@
         <button data-p="line">CUT&nbsp;(straight)</button>
       </div>
       <button class="go" id="go">▶ Execute move</button>
-      <button class="ghostbtn" id="home">⤺ Park to current = (0, 0) joints</button>
+      <button class="ghostbtn" id="home">⤺ Reset simulation to folded start</button>
     </div>
   </div>
 
   <!-- ============ STAGE ============ -->
   <div class="stage">
     <canvas id="cv"></canvas>
-    <div class="badge" id="badge">workspace · 0–600 mm</div>
+    <div class="badge" id="badge">workspace · 0–400 mm</div>
     <div class="err" id="err">⚠ target out of range</div>
   </div>
 
@@ -210,10 +198,9 @@ const TAU = Math.PI*2, D2R = Math.PI/180, R2D = 180/Math.PI;
 
 // ---------------- state ----------------
 const S = {
-  L1:300, L2:300, g1:6, g2:9, spr:200, micro:16,
+  L1:200, L2:200, g1:6, g2:9, spr:200, micro:32,
   coord:"xy", elbow:"up", mode:"both", path:"rapid",
-  configOk:true,
-  cur:{t1:0, t2:0},            // current joint angles (rad)
+  cur:{t1:0, t2:Math.PI},       // required folded startup pose
   cmd:{t1:0, t2:0, ok:false},  // commanded/target pose from inputs
   trail:[], anim:null
 };
@@ -236,24 +223,12 @@ function inverse(x,y,elbow){
 const stepsPerRad = g => S.spr*S.micro*g/TAU;
 
 // ---------------- read inputs ----------------
-function readGeom(){
-  const values=["L1","L2","g1","g2","spr","micro"].map(id=>+$(id).value);
-  S.configOk=values.every(value=>Number.isFinite(value)&&value>0);
-  if(!S.configOk) return false;
-  [S.L1,S.L2,S.g1,S.g2,S.spr,S.micro]=values;
-  return true;
-}
 function targetXY(){
   if(S.coord==="xy") return [ +$("tx").value, +$("ty").value ];
   const r=+$("tr").value, p=(+$("tphi").value)*D2R;
   return [ r*Math.cos(p), r*Math.sin(p) ];
 }
 function recompute(){
-  if(!readGeom()){
-    S.cmd.ok=false;
-    updateTelemetry(); draw();
-    return;
-  }
   const [x,y]=targetXY();
   const sol=inverse(x,y,S.elbow);
   if(sol){ S.cmd.t1=sol[0]; S.cmd.t2=sol[1]; S.cmd.ok=true; }
@@ -287,7 +262,7 @@ function updateTelemetry(){
   $("o_s2").textContent=ds2.toLocaleString();
   const r1=360/(S.spr*S.micro*S.g1), r2=360/(S.spr*S.micro*S.g2);
   $("o_res").textContent=`${r1.toFixed(4)}° / ${r2.toFixed(4)}°`;
-  $("err").textContent = S.configOk ? "⚠ target out of range":"⚠ geometry and ratios must be positive";
+  $("err").textContent = "⚠ target out of range";
   $("err").style.display = S.cmd.ok ? "none":"block";
   $("badge").textContent = `workspace · ${Math.abs(S.L1-S.L2).toFixed(0)}–${(S.L1+S.L2).toFixed(0)} mm`;
 }
@@ -420,6 +395,11 @@ function execute(){
   const end=achievedPose();
   const lineMode = (S.mode==="both" && S.path==="line");
   const startTip=forward(start.t1,start.t2);
+  if(lineMode&&Math.hypot(startTip[0],startTip[1])<1){
+    $("err").textContent="⚠ use RAPID to unfold before a straight cut";
+    $("err").style.display="block";
+    return;
+  }
   if(lineMode&&!lineReachable(startTip[0],startTip[1],S.cmd.x,S.cmd.y)){
     $("err").textContent="⚠ straight path crosses unreachable zone";
     $("err").style.display="block";
@@ -457,7 +437,7 @@ function execute(){
 }
 
 // ---------------- wiring ----------------
-["L1","L2","g1","g2","spr","micro","tx","ty","tr","tphi"].forEach(id=>{
+["tx","ty","tr","tphi"].forEach(id=>{
   $(id).addEventListener("input",recompute);
 });
 function segWire(seg,key,fn){
@@ -476,12 +456,11 @@ segWire("modeSeg","mode",b=>S.mode=b.dataset.m);
 segWire("pathSeg","path",b=>S.path=b.dataset.p);
 $("go").addEventListener("click",execute);
 $("home").addEventListener("click",()=>{
-  if(S.anim) return; S.cur={t1:0,t2:0}; S.trail=[]; recompute();
+  if(S.anim) return; S.cur={t1:0,t2:Math.PI}; S.trail=[]; recompute();
 });
 
 new ResizeObserver(()=>{resize();draw();}).observe(cv);
 window.addEventListener("load",()=>{ resize();
-  // start the live arm at a sensible pose so it isn't folded on the axis
-  S.cur={t1:30*D2R,t2:-60*D2R}; recompute();
+  S.cur={t1:0,t2:Math.PI}; recompute();
 });
 </script>

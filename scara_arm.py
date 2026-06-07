@@ -23,7 +23,7 @@ API (see demo() at the bottom for a worked example)
 ----------------------------------------------------
   arm = ScaraArm()
   arm.enable()
-  arm.set_origin(0, 0)            # declare the CURRENT pose as t1=0, t2=0
+  # Power on with the arm physically folded; startup state is J1=0, J2=180.
   arm.move_joint(1, 30)          # JOINT-1 ONLY  -> shoulder to 30 deg
   arm.move_joint(2, -45)         # JOINT-2 ONLY  -> elbow to -45 deg
   arm.move_joint(1, 10, relative=True)
@@ -39,45 +39,40 @@ from machine import Pin
 from time import sleep_us, ticks_us, ticks_diff, ticks_add
 
 # =============================================================================
-#  CONFIG  -- everything machine-specific lives here
+#  FIXED MACHINE DEFINITION
 # =============================================================================
 
 # ---- Geometry (mm, axis-to-axis link lengths) -------------------------------
-L1 = 300.0          # shoulder pivot  -> elbow pivot
-L2 = 300.0          # elbow pivot     -> cutting tip
+L1 = 200.0          # shoulder pivot -> elbow pivot
+L2 = 200.0          # elbow pivot -> cutting tip
 
 # ---- Drivetrain -------------------------------------------------------------
-STEPS_PER_MOTOR_REV = 200      # 1.8 deg motor = 200 ; 0.9 deg motor = 400
-MICROSTEP           = 16       # set to your driver's MAX and match the hardware:
-                               #   A4988      -> 16   (MS jumpers)
-                               #   DRV8825    -> 32   (MS jumpers)
-                               #   TMC2208/09 -> 256  (set via UART / jumpers)
-GEAR_J1 = 6.0                  # shoulder pulley reduction  (driven:drive = 6:1)
-GEAR_J2 = 9.0                  # elbow    pulley reduction  (9:1)
+STEPS_PER_MOTOR_REV = 200      # 1.8-degree NEMA 23 and NEMA 17 motors
+MICROSTEP = 32                 # TB6600 DIP switches must also be set to 32
+GEAR_J1 = 6.0                  # motor turns per shoulder revolution
+GEAR_J2 = 9.0                  # motor turns per elbow revolution
 
-# Belt-coupling compensation.
-#   If the ELBOW motor is grounded at the base and reaches the elbow through a
-#   belt running along link1 (classic remote SCARA drive), rotating the
-#   shoulder by t1 also rotates the elbow output. Set COUPLING so the elbow
-#   motor command becomes:  motor2 <- (t2 + COUPLING * t1).
-#   0.0  -> joints are independent (separate motor per joint)
-#  -1.0  -> grounded 1:1 belt keeps link2 parallel to ground as shoulder turns
-# Verify against YOUR belt routing; leave 0.0 if unsure.
+# Motor 2 is mounted on link 1, so the two joints are mechanically independent.
 COUPLING = 0.0
+
+# The arm must physically be in this pose whenever the controller starts.
+START_T1_DEG = 0.0
+START_T2_DEG = 180.0
+FOLDED_RADIUS_MM = 1.0
 
 # Per-axis direction sign. Flip if a joint drives the wrong way.
 INVERT_J1 = False
 INVERT_J2 = False
 
 # ---- Motion profile (units = MICROSTEPS, on the dominant/major axis) --------
-MAX_STEP_RATE = 5000.0         # cruise ceiling  [microsteps / s]
-ACCEL         = 12000.0        # acceleration    [microsteps / s^2]
-PULSE_US      = 3              # STEP high time (A4988>=1us, DRV8825>=1.9us)
-DIR_SETUP_US  = 5              # settle time after a DIR change
+MAX_STEP_RATE = 5000.0         # cruise ceiling [microsteps / s]
+ACCEL = 12000.0                # acceleration [microsteps / s^2]
+PULSE_US = 10                  # conservative pulse width for TB6600 inputs
+DIR_SETUP_US = 10              # direction setup time before the first pulse
 
 # ---- Soft joint limits (deg). Moves outside these raise ValueError ----------
 J1_MIN, J1_MAX = -180.0, 180.0
-J2_MIN, J2_MAX = -150.0, 150.0
+J2_MIN, J2_MAX = -180.0, 180.0
 
 # ---- Pin map (ESP32-WROOM; avoids input-only 34/35/36/39 & boot-strap pins) -
 PIN_J1_STEP = 25
@@ -128,9 +123,8 @@ class ScaraArm:
         self.L1 = L1
         self.L2 = L2
         self.coupling = COUPLING
-        # current joint angles (rad)
-        self.t1 = 0.0
-        self.t2 = 0.0
+        # No encoders yet: software position is valid only if startup is folded.
+        self.set_folded_start()
 
     # ------------------------------------------------------------------ power
     def enable(self):
@@ -209,10 +203,10 @@ class ScaraArm:
         motor2_angle = self.j2.pos / self.j2.steps_per_rad
         self.t2 = motor2_angle - self.coupling * self.t1
 
-    def set_origin(self, t1_deg=0.0, t2_deg=0.0):
-        """Declare the arm's CURRENT physical pose as these angles."""
-        self.t1 = math.radians(t1_deg)
-        self.t2 = math.radians(t2_deg)
+    def set_folded_start(self):
+        """Reset software state to the required physical startup pose."""
+        self.t1 = math.radians(START_T1_DEG)
+        self.t2 = math.radians(START_T2_DEG)
         self.j1.pos, self.j2.pos = self._angle_to_steps(self.t1, self.t2)
 
     def position(self):
@@ -237,8 +231,7 @@ class ScaraArm:
 
     def move_joint(self, joint, angle_deg, relative=False):
         """Move ONE joint only (1 = shoulder, 2 = elbow). The other holds.
-        Note: with COUPLING != 0 the elbow motor still moves on a J1-only
-        command to keep the elbow angle fixed -- that is correct."""
+        The other joint remains at its current angle."""
         if joint == 1:
             t1d = math.degrees(self.t1) + angle_deg if relative else angle_deg
             self.move_to_angles(t1d, math.degrees(self.t2))
@@ -260,6 +253,9 @@ class ScaraArm:
         cut is continuous rather than stop-start at every segment."""
         if seg_mm <= 0:
             raise ValueError("seg_mm must be greater than zero")
+        current_x, current_y = self.forward(self.t1, self.t2)
+        if math.sqrt(current_x * current_x + current_y * current_y) < FOLDED_RADIUS_MM:
+            raise ValueError("unfold with move_to_xy before starting a straight cut")
         if not self.line_reachable(x0, y0, x1, y1):
             raise ValueError("line crosses unreachable workspace")
         dist = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
@@ -419,8 +415,6 @@ def demo():
     arm = ScaraArm()
     arm.enable()
     try:
-        arm.set_origin(0, 0)           # park the arm straight, then run this
-
         print("start :", arm.position())
 
         arm.move_joint(1, 30)          # shoulder only

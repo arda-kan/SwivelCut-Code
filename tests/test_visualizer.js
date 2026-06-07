@@ -63,17 +63,10 @@ S.L1=500; S.L2=100;
 assert.strictEqual(lineReachable(600,0,-600,0), false);
 assert.strictEqual(lineReachable(600,0,500,0), true);
 
-$("L1").value="300"; $("L2").value="300";
-$("g1").value="6"; $("g2").value="9";
-$("spr").value="200"; $("micro").value="16";
-assert.strictEqual(readGeom(), true);
-$("g1").value="0";
-assert.strictEqual(readGeom(), false);
-
 S.g1=6; S.spr=200; S.micro=16;
 S.cur.t1=-179.9*D2R;
 S.cmd={t1:-179.8*D2R,t2:0,ok:true,x:0,y:0};
-S.mode="both"; S.configOk=true;
+S.mode="both";
 updateTelemetry();
 assert.strictEqual($("o_s1").textContent, "6");
 `;
