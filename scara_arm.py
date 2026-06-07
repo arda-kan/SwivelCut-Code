@@ -154,24 +154,60 @@ class ScaraArm:
         L1, L2 = self.L1, self.L2
         r2 = x * x + y * y
         c2 = (r2 - L1 * L1 - L2 * L2) / (2.0 * L1 * L2)
-        if c2 < -1.0 or c2 > 1.0:
+        if c2 < -1.0 - 1e-12 or c2 > 1.0 + 1e-12:
             raise ValueError("unreachable point ({:.1f}, {:.1f})".format(x, y))
+        c2 = max(-1.0, min(1.0, c2))
         s2 = math.sqrt(1.0 - c2 * c2)
         if elbow == "down":
             s2 = -s2
         t2 = math.atan2(s2, c2)
         t1 = math.atan2(y, x) - math.atan2(L2 * s2, L1 + L2 * c2)
-        return t1, t2
+        return self._normalize_angle(t1), self._normalize_angle(t2)
 
     def reachable(self, x, y):
         r = math.sqrt(x * x + y * y)
         return abs(self.L1 - self.L2) <= r <= (self.L1 + self.L2)
+
+    def line_reachable(self, x0, y0, x1, y1):
+        """Whether every point on a segment lies in the reachable annulus."""
+        if not self.reachable(x0, y0) or not self.reachable(x1, y1):
+            return False
+        dx = x1 - x0
+        dy = y1 - y0
+        length2 = dx * dx + dy * dy
+        if length2 == 0:
+            return True
+        projection = -(x0 * dx + y0 * dy) / length2
+        projection = max(0.0, min(1.0, projection))
+        nearest_x = x0 + projection * dx
+        nearest_y = y0 + projection * dy
+        nearest_r = math.sqrt(nearest_x * nearest_x + nearest_y * nearest_y)
+        return nearest_r + 1e-9 >= abs(self.L1 - self.L2)
 
     # -------------------------------------------------------- step accounting
     def _angle_to_steps(self, t1, t2):
         s1 = round(t1 * self.j1.steps_per_rad)
         s2 = round((t2 + self.coupling * t1) * self.j2.steps_per_rad)
         return s1, s2
+
+    @staticmethod
+    def _normalize_angle(angle):
+        """Return an equivalent angle in the conventional [-pi, pi] range."""
+        normalized = (angle + math.pi) % TWO_PI - math.pi
+        return math.pi if normalized == -math.pi and angle > 0 else normalized
+
+    @staticmethod
+    def _validate_angles(t1_deg, t2_deg):
+        if not (J1_MIN <= t1_deg <= J1_MAX):
+            raise ValueError("J1 {:.1f} out of [{}, {}]".format(t1_deg, J1_MIN, J1_MAX))
+        if not (J2_MIN <= t2_deg <= J2_MAX):
+            raise ValueError("J2 {:.1f} out of [{}, {}]".format(t2_deg, J2_MIN, J2_MAX))
+
+    def _sync_angles_from_steps(self):
+        """Reconstruct joint state from emitted steps, including belt coupling."""
+        self.t1 = self.j1.pos / self.j1.steps_per_rad
+        motor2_angle = self.j2.pos / self.j2.steps_per_rad
+        self.t2 = motor2_angle - self.coupling * self.t1
 
     def set_origin(self, t1_deg=0.0, t2_deg=0.0):
         """Declare the arm's CURRENT physical pose as these angles."""
@@ -186,17 +222,18 @@ class ScaraArm:
     # ----------------------------------------------------------- public moves
     def move_to_angles(self, t1_deg, t2_deg, ramp_in=True, ramp_out=True):
         """Coordinated move of BOTH joints to absolute angles (deg)."""
-        if not (J1_MIN <= t1_deg <= J1_MAX):
-            raise ValueError("J1 {:.1f} out of [{}, {}]".format(t1_deg, J1_MIN, J1_MAX))
-        if not (J2_MIN <= t2_deg <= J2_MAX):
-            raise ValueError("J2 {:.1f} out of [{}, {}]".format(t2_deg, J2_MIN, J2_MAX))
+        self._validate_angles(t1_deg, t2_deg)
         t1 = math.radians(t1_deg)
         t2 = math.radians(t2_deg)
         tgt1, tgt2 = self._angle_to_steps(t1, t2)
         d1 = tgt1 - self.j1.pos
         d2 = tgt2 - self.j2.pos
-        self._execute(d1, d2, ramp_in, ramp_out)
-        self.t1, self.t2 = t1, t2
+        try:
+            self._execute(d1, d2, ramp_in, ramp_out)
+        finally:
+            # Also runs after Ctrl-C or a hardware exception, so software state
+            # remains aligned with every pulse that was actually emitted.
+            self._sync_angles_from_steps()
 
     def move_joint(self, joint, angle_deg, relative=False):
         """Move ONE joint only (1 = shoulder, 2 = elbow). The other holds.
@@ -221,9 +258,22 @@ class ScaraArm:
         The path is split into short joint-space segments; the arm ramps up on
         the first, cruises through the middle and ramps down on the last so the
         cut is continuous rather than stop-start at every segment."""
+        if seg_mm <= 0:
+            raise ValueError("seg_mm must be greater than zero")
+        if not self.line_reachable(x0, y0, x1, y1):
+            raise ValueError("line crosses unreachable workspace")
         dist = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
         n = max(1, int(math.ceil(dist / seg_mm)))
-        # make sure we start at the line's first point
+
+        # Validate the complete line before emitting any step. This matters when
+        # unequal links create an unreachable hole inside the outer reach disk.
+        for i in range(n + 1):
+            f = i / float(n)
+            xi = x0 + (x1 - x0) * f
+            yi = y0 + (y1 - y0) * f
+            t1, t2 = self.inverse(xi, yi, elbow)
+            self._validate_angles(math.degrees(t1), math.degrees(t2))
+
         self.move_to_xy(x0, y0, elbow)
         for i in range(1, n + 1):
             f = i / float(n)
@@ -357,8 +407,9 @@ def jog_with_buttons(arm, pin_a=4, pin_b=16, step_deg=1.0):
                 arm.move_joint(2, step_deg, relative=True)
             sleep_ms(20)
     except KeyboardInterrupt:
-        arm.disable()
         print("stopped:", arm.position())
+    finally:
+        arm.disable()
 
 
 # =============================================================================
@@ -367,25 +418,27 @@ def jog_with_buttons(arm, pin_a=4, pin_b=16, step_deg=1.0):
 def demo():
     arm = ScaraArm()
     arm.enable()
-    arm.set_origin(0, 0)               # park the arm straight, then run this
+    try:
+        arm.set_origin(0, 0)           # park the arm straight, then run this
 
-    print("start :", arm.position())
+        print("start :", arm.position())
 
-    arm.move_joint(1, 30)              # shoulder only
-    arm.move_joint(2, -60)             # elbow only
-    arm.move_to_angles(15, -30)        # both, coordinated
-    arm.move_to_xy(250, 180, elbow="up")
-    print("at xy :", arm.position())
+        arm.move_joint(1, 30)          # shoulder only
+        arm.move_joint(2, -60)         # elbow only
+        arm.move_to_angles(15, -30)    # both, coordinated
+        arm.move_to_xy(250, 180, elbow="up")
+        print("at xy :", arm.position())
 
-    # cut a 150 mm square outline
-    arm.cut_line(150, -75, 300, -75)
-    arm.cut_line(300, -75, 300,  75)
-    arm.cut_line(300,  75, 150,  75)
-    arm.cut_line(150,  75, 150, -75)
+        # cut a 150 mm square outline
+        arm.cut_line(150, -75, 300, -75)
+        arm.cut_line(300, -75, 300,  75)
+        arm.cut_line(300,  75, 150,  75)
+        arm.cut_line(150,  75, 150, -75)
 
-    arm.move_to_angles(0, 0)
-    arm.disable()
-    print("done  :", arm.position())
+        arm.move_to_angles(0, 0)
+        print("done  :", arm.position())
+    finally:
+        arm.disable()
 
 
 if __name__ == "__main__":

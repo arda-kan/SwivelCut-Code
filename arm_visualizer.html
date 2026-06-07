@@ -115,16 +115,16 @@
     <div class="grp">
       <h2>Geometry</h2>
       <div class="row">
-        <div class="field"><label>Link 1 L1 (mm)</label><input id="L1" type="number" value="300" step="5"></div>
-        <div class="field"><label>Link 2 L2 (mm)</label><input id="L2" type="number" value="300" step="5"></div>
+        <div class="field"><label>Link 1 L1 (mm)</label><input id="L1" type="number" value="300" min="0.001" step="5"></div>
+        <div class="field"><label>Link 2 L2 (mm)</label><input id="L2" type="number" value="300" min="0.001" step="5"></div>
       </div>
     </div>
 
     <div class="grp">
       <h2>Drivetrain</h2>
       <div class="row">
-        <div class="field"><label>Pulley J1</label><input id="g1" type="number" value="6" step="1"></div>
-        <div class="field"><label>Pulley J2</label><input id="g2" type="number" value="9" step="1"></div>
+        <div class="field"><label>Pulley J1</label><input id="g1" type="number" value="6" min="0.001" step="1"></div>
+        <div class="field"><label>Pulley J2</label><input id="g2" type="number" value="9" min="0.001" step="1"></div>
       </div>
       <div class="row" style="margin-top:9px">
         <div class="field"><label>Steps / rev</label>
@@ -212,6 +212,7 @@ const TAU = Math.PI*2, D2R = Math.PI/180, R2D = 180/Math.PI;
 const S = {
   L1:300, L2:300, g1:6, g2:9, spr:200, micro:16,
   coord:"xy", elbow:"up", mode:"both", path:"rapid",
+  configOk:true,
   cur:{t1:0, t2:0},            // current joint angles (rad)
   cmd:{t1:0, t2:0, ok:false},  // commanded/target pose from inputs
   trail:[], anim:null
@@ -224,8 +225,9 @@ function forward(t1,t2){
 }
 function inverse(x,y,elbow){
   const r2=x*x+y*y;
-  const c2=(r2 - S.L1*S.L1 - S.L2*S.L2)/(2*S.L1*S.L2);
-  if(c2<-1||c2>1) return null;
+  let c2=(r2 - S.L1*S.L1 - S.L2*S.L2)/(2*S.L1*S.L2);
+  if(c2 < -1-1e-12 || c2 > 1+1e-12) return null;
+  c2=Math.max(-1,Math.min(1,c2));
   let s2=Math.sqrt(1-c2*c2); if(elbow==="down") s2=-s2;
   const t2=Math.atan2(s2,c2);
   const t1=Math.atan2(y,x)-Math.atan2(S.L2*s2, S.L1+S.L2*c2);
@@ -235,9 +237,11 @@ const stepsPerRad = g => S.spr*S.micro*g/TAU;
 
 // ---------------- read inputs ----------------
 function readGeom(){
-  S.L1=+$("L1").value||1; S.L2=+$("L2").value||1;
-  S.g1=+$("g1").value||1; S.g2=+$("g2").value||1;
-  S.spr=+$("spr").value;  S.micro=+$("micro").value;
+  const values=["L1","L2","g1","g2","spr","micro"].map(id=>+$(id).value);
+  S.configOk=values.every(value=>Number.isFinite(value)&&value>0);
+  if(!S.configOk) return false;
+  [S.L1,S.L2,S.g1,S.g2,S.spr,S.micro]=values;
+  return true;
 }
 function targetXY(){
   if(S.coord==="xy") return [ +$("tx").value, +$("ty").value ];
@@ -245,7 +249,11 @@ function targetXY(){
   return [ r*Math.cos(p), r*Math.sin(p) ];
 }
 function recompute(){
-  readGeom();
+  if(!readGeom()){
+    S.cmd.ok=false;
+    updateTelemetry(); draw();
+    return;
+  }
   const [x,y]=targetXY();
   const sol=inverse(x,y,S.elbow);
   if(sol){ S.cmd.t1=sol[0]; S.cmd.t2=sol[1]; S.cmd.ok=true; }
@@ -273,12 +281,13 @@ function updateTelemetry(){
   const m1=tgt.t1/TAU*S.g1, m2=tgt.t2/TAU*S.g2;
   $("o_m1").innerHTML = fmt(m1,2)+'<span class="u">rev</span>';
   $("o_m2").innerHTML = fmt(m2,2)+'<span class="u">rev</span>';
-  const ds1=Math.round((tgt.t1-S.cur.t1)*stepsPerRad(S.g1));
-  const ds2=Math.round((tgt.t2-S.cur.t2)*stepsPerRad(S.g2));
+  const ds1=Math.round(tgt.t1*stepsPerRad(S.g1))-Math.round(S.cur.t1*stepsPerRad(S.g1));
+  const ds2=Math.round(tgt.t2*stepsPerRad(S.g2))-Math.round(S.cur.t2*stepsPerRad(S.g2));
   $("o_s1").textContent=ds1.toLocaleString();
   $("o_s2").textContent=ds2.toLocaleString();
   const r1=360/(S.spr*S.micro*S.g1), r2=360/(S.spr*S.micro*S.g2);
   $("o_res").textContent=`${r1.toFixed(4)}° / ${r2.toFixed(4)}°`;
+  $("err").textContent = S.configOk ? "⚠ target out of range":"⚠ geometry and ratios must be positive";
   $("err").style.display = S.cmd.ok ? "none":"block";
   $("badge").textContent = `workspace · ${Math.abs(S.L1-S.L2).toFixed(0)}–${(S.L1+S.L2).toFixed(0)} mm`;
 }
@@ -296,7 +305,7 @@ function resize(){
 function fitView(){
   const Rmax=S.L1+S.L2;
   const pad=46;
-  scale=(Math.min(W,H)/2 - pad)/Rmax;
+  scale=Math.max(0,(Math.min(W,H)/2 - pad))/Rmax;
   ox=W/2; oy=H/2;            // base at canvas centre (centre of reach disk)
 }
 const sx=x=>ox+x*scale, sy=y=>oy-y*scale;
@@ -398,12 +407,24 @@ function easeTrap(t){            // accel / cruise / decel-ish profile
   if(t<1-a)      return (t-a/2)/(1-a);
   const u=1-t;   return 1-(u*u)/(2*a*(1-a));
 }
+function lineReachable(x0,y0,x1,y1){
+  const dx=x1-x0, dy=y1-y0;
+  const len2=dx*dx+dy*dy;
+  const u=len2===0?0:Math.max(0,Math.min(1,-(x0*dx+y0*dy)/len2));
+  const nearest=Math.hypot(x0+u*dx,y0+u*dy);
+  return nearest+1e-9>=Math.abs(S.L1-S.L2);
+}
 function execute(){
   if(!S.cmd.ok || S.anim) return;
   const start={t1:S.cur.t1,t2:S.cur.t2};
   const end=achievedPose();
   const lineMode = (S.mode==="both" && S.path==="line");
   const startTip=forward(start.t1,start.t2);
+  if(lineMode&&!lineReachable(startTip[0],startTip[1],S.cmd.x,S.cmd.y)){
+    $("err").textContent="⚠ straight path crosses unreachable zone";
+    $("err").style.display="block";
+    return;
+  }
   const dJoint=Math.max(Math.abs(end.t1-start.t1),Math.abs(end.t2-start.t2));
   if(dJoint<1e-4 && !lineMode){ return; }
   const dur=Math.max(450, Math.min(2200, dJoint*R2D*9));  // ms, ~scaled to travel
