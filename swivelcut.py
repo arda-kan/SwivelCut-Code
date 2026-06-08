@@ -71,7 +71,9 @@ class SwivelCut:
         self.L1 = L1
         self.L2 = L2
         self.coupling = COUPLING
-        self.set_folded_start()
+        self.t1 = math.radians(START_T1_DEG)
+        self.t2 = math.radians(START_T2_DEG)
+        self.j1.pos, self.j2.pos = self._angle_to_steps(self.t1, self.t2)
 
     def enable(self):
         if self.en:
@@ -96,5 +98,3 @@ class SwivelCut:
         c2 = (r2 - L1 * L1 - L2 * L2) / (2.0 * L1 * L2)
         if c2 < -1.0 - 1e-12 or c2 > 1.0 + 1e-12:
             raise ValueError("unreachable point ({:.1f}, {:.1f})".format(x, y))
-        c2 = max(-1.0, min(1.0, c2))
-        s2 = math.sqrt(1.0 - c2 * c2)
