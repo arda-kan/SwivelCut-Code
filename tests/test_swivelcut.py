@@ -164,7 +164,7 @@ class SwivelCutTests(unittest.TestCase):
     def test_straight_cut_requires_unfolding_first(self):
         arm = swivelcut.SwivelCut()
 
-        with self.assertRaisesRegex(ValueError, "unfold"):
+        with self.assertRaisesRegex(ValueError, r"first use XY <x> <y>"):
             arm.cut_line(100, 100, 200, 100)
 
 

@@ -202,7 +202,10 @@ class SwivelCut:
             raise ValueError("seg_mm must be greater than zero")
         current_x, current_y = self.forward(self.t1, self.t2)
         if math.sqrt(current_x * current_x + current_y * current_y) < FOLDED_RADIUS_MM:
-            raise ValueError("unfold with move_to_xy before starting a straight cut")
+            raise ValueError(
+                "arm is folded at singular XY (0, 0); first use XY <x> <y>, "
+                "then CUT from that same nonzero point"
+            )
         if not self.line_reachable(x0, y0, x1, y1):
             raise ValueError("line crosses unreachable workspace")
         dist = math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)

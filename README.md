@@ -163,7 +163,14 @@ Angles are absolute degrees, not relative movements. `ANGLES 30 120` means
 millimetres from the shoulder pivot. `XYJ1` and `XYJ2` calculate the normal XY
 solution but move only the named joint. Because the other joint stays still,
 the blade will usually not finish at the requested XY point. Before `CUT`, move
-to a safely unfolded starting position.
+to a safely unfolded starting position. A cut cannot begin at exact `(0, 0)`
+because the fully folded arm is a singularity. For a forward centerline cut,
+start slightly away from the origin:
+
+```text
+XY 0 20 UP
+CUT 0 20 0 400 UP
+```
 
 For example, this moves both links into the straight-ahead pose:
 
