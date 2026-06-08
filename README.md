@@ -29,9 +29,9 @@ point-to-point move to unfold the arm before calling `cut_line()`.
 - GPIO 27: shared active-low enable
 
 Positive joint angles are counterclockwise when viewed from above the cutting
-plane. The current direction settings assume a high DIR signal produces that
-motion. Reverse the relevant motor connector if the installed wiring moves a
-joint clockwise for a positive command.
+plane. J1 uses the normal driver direction and J2 is inverted to match the
+installed motor and belt direction. This changes only the electrical direction
+signal; the reported joint angles and Cartesian calculations stay unchanged.
 
 Coordinates use positive `X = physical right` and positive `Y = forward`.
 With both links straight, `J1=0`, `J2=0` is `(X=0, Y=400)`.

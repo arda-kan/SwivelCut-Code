@@ -22,7 +22,7 @@ FOLDED_RADIUS_MM = 1.0
 
 # Set either value to True if that joint runs backwards.
 INVERT_J1 = False
-INVERT_J2 = False
+INVERT_J2 = True
 
 # Motion timing
 MAX_STEP_RATE = 1500.0         # cruise ceiling [microsteps / s]

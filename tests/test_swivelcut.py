@@ -53,6 +53,12 @@ class SwivelCutTests(unittest.TestCase):
         self.assertEqual(arm.j1.step.value(), 1)
         self.assertEqual(arm.j2.step.value(), 1)
 
+    def test_only_j2_motor_direction_is_inverted(self):
+        arm = swivelcut.SwivelCut()
+
+        self.assertFalse(arm.j1.invert)
+        self.assertTrue(arm.j2.invert)
+
     def test_xy_zero_400_is_straight_ahead(self):
         arm = swivelcut.SwivelCut()
 
