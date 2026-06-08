@@ -15,7 +15,7 @@ class FakeArm:
     def __init__(self):
         self.calls = []
         self.enabled = False
-        self.pose = (0.0, 0.0, 0.0, 180.0)
+        self.pose = (0.0, 0.0, 0.0, -180.0)
 
     def enable(self):
         self.enabled = True
@@ -82,6 +82,14 @@ class SwivelCutConsoleTests(unittest.TestCase):
         self.assertIn(("xy_joint", 1, 150.0, 100.0, "up"), self.arm.calls)
         self.assertIn(("xy_joint", 2, 150.0, 100.0, "down"), self.arm.calls)
         self.assertIn(("cut", 100.0, 100.0, 250.0, 100.0, "up"), self.arm.calls)
+
+    def test_cartesian_commands_default_to_right_opening_branch(self):
+        self.console.execute("ARM FOLDED")
+        self.console.execute("XY 20 20")
+        self.console.execute("CUT 20 20 30 20")
+
+        self.assertIn(("xy", 20.0, 20.0, "down"), self.arm.calls)
+        self.assertIn(("cut", 20.0, 20.0, 30.0, 20.0, "down"), self.arm.calls)
 
     def test_shutdown_disables_drivers(self):
         self.console.execute("ARM FOLDED")

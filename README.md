@@ -9,7 +9,7 @@ Controller and motion visualizer for the two-joint SwivelCut cardboard cutter.
 - NEMA 17 elbow motor mounted on link 1 with 9:1 pulley reduction
 - 200 full steps per motor revolution
 - TB6600 drivers set to 1/32 microstepping
-- Required startup pose: J1 = 0 degrees, J2 = 180 degrees (fully folded)
+- Required startup pose: J1 = 0 degrees, J2 = -180 degrees (fully folded)
 - J1 software travel: -90 to +90 degrees
 - J2 software travel: -180 to +180 degrees
 
@@ -33,8 +33,8 @@ plane. The current direction settings assume a high DIR signal produces that
 motion. Reverse the relevant motor connector if the installed wiring moves a
 joint clockwise for a positive command.
 
-Coordinates use `X = sideways` and `Y = forward`. With both links straight,
-`J1=0`, `J2=0` is `(X=0, Y=400)`.
+Coordinates use positive `X = physical right` and positive `Y = forward`.
+With both links straight, `J1=0`, `J2=0` is `(X=0, Y=400)`.
 
 The STEP outputs idle HIGH and pulse LOW. This matches the common-anode wiring
 shown earlier, where the interface sinks `PUL-` during a step.
@@ -132,10 +132,10 @@ The drivers remain disabled until this exact confirmation is received. Begin
 with small moves and keep clear of the mechanism:
 
 ```text
-J2 175
+J2 -175
 J1 5
 J1 0
-J2 180
+J2 -180
 ```
 
 If a positive command turns a joint clockwise rather than counterclockwise,

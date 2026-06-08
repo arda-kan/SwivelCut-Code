@@ -45,7 +45,7 @@ class SwivelCutTests(unittest.TestCase):
         self.assertAlmostEqual(x, 0.0, places=6)
         self.assertAlmostEqual(y, 0.0, places=6)
         self.assertAlmostEqual(t1, 0.0)
-        self.assertAlmostEqual(t2, 180.0)
+        self.assertAlmostEqual(t2, -180.0)
 
     def test_step_outputs_idle_high(self):
         arm = swivelcut.SwivelCut()
@@ -71,6 +71,17 @@ class SwivelCutTests(unittest.TestCase):
 
         self.assertAlmostEqual(x, 0.0, places=6)
         self.assertAlmostEqual(y, 400.0, places=6)
+
+    def test_positive_xy_uses_right_opening_solution(self):
+        arm = swivelcut.SwivelCut()
+
+        t1, t2 = arm.inverse(20, 20)
+        x, y = arm.forward(t1, t2)
+
+        self.assertAlmostEqual(math.degrees(t1), 40.945, places=3)
+        self.assertAlmostEqual(math.degrees(t2), -171.890, places=3)
+        self.assertAlmostEqual(x, 20.0, places=6)
+        self.assertAlmostEqual(y, 20.0, places=6)
 
     def test_line_crossing_inner_hole_is_rejected_before_motion(self):
         arm = swivelcut.SwivelCut()
