@@ -56,7 +56,7 @@ class SwivelCutConsole:
             self.arm.set_folded_start()
             self.arm.enable()
             self.armed = True
-            self.output("ARMED: folded pose set to J1=0.0, J2=180.0")
+            self.output("ARMED: folded pose set to J1=0.0, J2=-180.0")
         elif command == "DISARM":
             self.arm.disable()
             self.armed = False
@@ -95,49 +95,6 @@ class SwivelCutConsole:
             self._require_armed()
             if len(parts) not in (5, 6):
                 raise ValueError("use CUT <x0> <y0> <x1> <y1> [UP|DOWN]")
-            elbow = self._elbow(parts[5]) if len(parts) == 6 else "up"
+            elbow = self._elbow(parts[5]) if len(parts) == 6 else "down"
             coordinates = [float(value) for value in parts[1:5]]
             self.arm.cut_line(*coordinates, elbow=elbow)
-            self._print_position()
-        elif command == "POS":
-            self._print_position()
-        else:
-            raise ValueError("unknown command; type HELP")
-
-    @staticmethod
-    def _expect_count(parts, count, usage):
-        if len(parts) != count:
-            raise ValueError("use " + usage)
-
-    def _xy_args(self, parts, command):
-        if len(parts) not in (3, 4):
-            raise ValueError("use {} <x> <y> [UP|DOWN]".format(command))
-        elbow = self._elbow(parts[3]) if len(parts) == 4 else "up"
-        return float(parts[1]), float(parts[2]), elbow
-
-    def _print_position(self):
-        x, y, t1, t2 = self.arm.position()
-        self.output(
-            "POS x={:.1f} y={:.1f} J1={:.2f} J2={:.2f}".format(x, y, t1, t2)
-        )
-
-    def shutdown(self):
-        self.arm.disable()
-        self.armed = False
-
-
-def run_console():
-    console = SwivelCutConsole()
-    print("SwivelCut USB console")
-    print("Physically fold the arm, then type: ARM FOLDED")
-    print("Type HELP for all commands.")
-    try:
-        while True:
-            try:
-                console.execute(input("swivelcut> "))
-            except (ValueError, TypeError) as error:
-                print("ERROR:", error)
-    except (KeyboardInterrupt, EOFError):
-        print("\nEmergency stop: drivers disabled")
-    finally:
-        console.shutdown()
