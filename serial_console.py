@@ -56,7 +56,7 @@ class SwivelCutConsole:
             self.arm.set_folded_start()
             self.arm.enable()
             self.armed = True
-            self.output("ARMED: folded pose set to J1=0.0, J2=-180.0")
+            self.output("ARMED: folded pose set to J1=0.0, J2=180.0")
         elif command == "DISARM":
             self.arm.disable()
             self.armed = False
@@ -95,7 +95,7 @@ class SwivelCutConsole:
             self._require_armed()
             if len(parts) not in (5, 6):
                 raise ValueError("use CUT <x0> <y0> <x1> <y1> [UP|DOWN]")
-            elbow = self._elbow(parts[5]) if len(parts) == 6 else "down"
+            elbow = self._elbow(parts[5]) if len(parts) == 6 else "up"
             coordinates = [float(value) for value in parts[1:5]]
             self.arm.cut_line(*coordinates, elbow=elbow)
             self._print_position()
@@ -112,7 +112,7 @@ class SwivelCutConsole:
     def _xy_args(self, parts, command):
         if len(parts) not in (3, 4):
             raise ValueError("use {} <x> <y> [UP|DOWN]".format(command))
-        elbow = self._elbow(parts[3]) if len(parts) == 4 else "down"
+        elbow = self._elbow(parts[3]) if len(parts) == 4 else "up"
         return float(parts[1]), float(parts[2]), elbow
 
     def _print_position(self):

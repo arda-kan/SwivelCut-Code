@@ -17,7 +17,7 @@ COUPLING = 0.0
 
 # Known pose at power-on
 START_T1_DEG = 0.0
-START_T2_DEG = -180.0
+START_T2_DEG = 180.0
 FOLDED_RADIUS_MM = 1.0
 
 # Set either value to True if that joint runs backwards.
@@ -86,9 +86,9 @@ class SwivelCut:
         """Joint angles (rad) -> tip (x, y) mm."""
         forward = self.L1 * math.cos(t1) + self.L2 * math.cos(t1 + t2)
         sideways = self.L1 * math.sin(t1) + self.L2 * math.sin(t1 + t2)
-        return -sideways, forward
+        return sideways, forward
 
-    def inverse(self, x, y, elbow="down"):
+    def inverse(self, x, y, elbow="up"):
         """Tip (x, y) mm -> joint angles (t1, t2) rad. Raises if unreachable."""
         L1, L2 = self.L1, self.L2
         r2 = x * x + y * y
@@ -100,7 +100,7 @@ class SwivelCut:
         if elbow == "down":
             s2 = -s2
         t2 = math.atan2(s2, c2)
-        t1 = math.atan2(-x, y) - math.atan2(L2 * s2, L1 + L2 * c2)
+        t1 = math.atan2(x, y) - math.atan2(L2 * s2, L1 + L2 * c2)
         return self._normalize_angle(t1), self._normalize_angle(t2)
 
     def reachable(self, x, y):
@@ -181,12 +181,12 @@ class SwivelCut:
         else:
             raise ValueError("joint must be 1 or 2")
 
-    def move_to_xy(self, x, y, elbow="down"):
+    def move_to_xy(self, x, y, elbow="up"):
         """Inverse-kinematics point-to-point move to a Cartesian tip position."""
         t1, t2 = self.inverse(x, y, elbow)
         self.move_to_angles(math.degrees(t1), math.degrees(t2))
 
-    def move_joint_to_xy(self, joint, x, y, elbow="down"):
+    def move_joint_to_xy(self, joint, x, y, elbow="up"):
         """Use an XY solution for one joint and hold the other joint still."""
         if joint not in (1, 2):
             raise ValueError("joint must be 1 or 2")
@@ -196,7 +196,7 @@ class SwivelCut:
         else:
             self.move_to_angles(math.degrees(self.t1), math.degrees(t2))
 
-    def cut_line(self, x0, y0, x1, y1, elbow="down", seg_mm=LINE_SEG_MM):
+    def cut_line(self, x0, y0, x1, y1, elbow="up", seg_mm=LINE_SEG_MM):
         """Move the blade along a straight XY line."""
         if seg_mm <= 0:
             raise ValueError("seg_mm must be greater than zero")
