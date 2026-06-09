@@ -63,9 +63,31 @@ independent software-I2C buses:
 | J1 motor shaft | GPIO 21 | GPIO 22 |
 | J2 motor shaft | GPIO 18 | GPIO 19 |
 
-Connect both module grounds to ESP32 ground. Power the modules from 3.3 V so
-their I2C pull-ups cannot expose the ESP32 pins to 5 V. Confirm the exact pin
-labels and supply requirements on the purchased modules before applying power.
+Wire the module pins as follows:
+
+| J1 AS5600 pin | Connect to |
+| --- | --- |
+| VCC | ESP32 `3V3` |
+| GND | ESP32 `GND` |
+| SDA | ESP32 `GPIO 21` |
+| SCL | ESP32 `GPIO 22` |
+| DIR | Leave disconnected |
+| OUT | Leave disconnected |
+
+| J2 AS5600 pin | Connect to |
+| --- | --- |
+| VCC | ESP32 `3V3` |
+| GND | ESP32 `GND` |
+| SDA | ESP32 `GPIO 18` |
+| SCL | ESP32 `GPIO 19` |
+| DIR | Leave disconnected |
+| OUT | Leave disconnected |
+
+Both modules share the ESP32's `3V3` and `GND`, but their SDA/SCL pairs remain
+separate. Power the modules from 3.3 V so their onboard I2C pull-ups cannot
+expose the ESP32 pins to 5 V. Do not connect VCC to the motor power supply.
+Confirm the exact pin labels printed on the purchased modules before applying
+power; some boards arrange the header pins differently.
 
 The supplied diametric magnet must be centered on the motor shaft, parallel to
 the sensor face, and held at a stable gap. `ARM FOLDED` refuses to arm if either
@@ -90,6 +112,7 @@ branch assumes motor-shaft mounting and divides measured motor rotation by the
 ## Files
 
 - `as5600.py`: AS5600 register access and wrap-safe multi-turn tracking.
+- `encoder_test.py`: standalone wiring, angle, and magnet diagnostic.
 - `swivelcut.py`: MicroPython controller for an ESP32 and two stepper axes.
 - `serial_console.py`: guarded USB serial command parser.
 - `main.py`: starts the serial console automatically when the ESP32 boots.
@@ -112,6 +135,37 @@ otherwise use a suitable transistor or level-shifting interface.
 
 Test initially with the blade removed, low motor current, and an accessible
 emergency power switch.
+
+### Test the encoders before motor operation
+
+Keep the TB6600 motor supply switched off. From the repository directory, run:
+
+```sh
+python3 -m mpremote connect auto run encoder_test.py
+```
+
+The expected startup output contains address `0x36` on both buses:
+
+```text
+J1 bus: SDA=GPIO21 SCL=GPIO22 devices=['0x36']
+J2 bus: SDA=GPIO18 SCL=GPIO19 devices=['0x36']
+Both encoders found. Press Ctrl-C to stop.
+```
+
+Slowly rotate each motor shaft by hand. Its `raw` value and angle should change
+smoothly while the other encoder remains steady. The angle wraps between about
+359.9 and 0 degrees once per motor-shaft revolution.
+
+The magnet result should be `OK`:
+
+- `NOT DETECTED`: magnet absent, too far away, badly off-center, or incorrect
+  magnet type.
+- `TOO WEAK`: reduce the sensor-to-magnet gap or improve centering.
+- `TOO STRONG`: increase the sensor-to-magnet gap.
+
+If one bus does not list `0x36`, switch power off and check VCC, GND, SDA, and
+SCL for that module. Do not move wiring while it is powered. Stop the test with
+`Ctrl-C`.
 
 ### 2. Install the computer tools
 
