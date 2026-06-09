@@ -16,6 +16,8 @@ class FakeArm:
         self.calls = []
         self.enabled = False
         self.pose = (0.0, 0.0, 0.0, 180.0)
+        self.encoder_pose = (0.0, 180.0)
+        self.taught = []
 
     def enable(self):
         self.enabled = True
@@ -27,6 +29,15 @@ class FakeArm:
 
     def set_folded_start(self):
         self.calls.append(("folded",))
+
+    def calibrate_encoders(self):
+        self.calls.append(("calibrate",))
+
+    def encoder_status(self):
+        return "ok", "ok"
+
+    def encoder_angles(self):
+        return self.encoder_pose
 
     def move_joint(self, joint, angle):
         self.calls.append(("joint", joint, angle))
@@ -42,6 +53,21 @@ class FakeArm:
 
     def cut_line(self, x0, y0, x1, y1, elbow):
         self.calls.append(("cut", x0, y0, x1, y1, elbow))
+
+    def record_teach(self, duration, sample_hz):
+        self.calls.append(("teach", duration, sample_hz))
+        self.enabled = False
+        self.taught = [(0, 0, 180), (1000, 10, 160)]
+        return len(self.taught)
+
+    def replay_teach(self):
+        self.calls.append(("play",))
+        self.enabled = True
+        return len(self.taught)
+
+    def clear_teach(self):
+        self.calls.append(("clear",))
+        self.taught = []
 
     def position(self):
         return self.pose
@@ -62,7 +88,8 @@ class SwivelCutConsoleTests(unittest.TestCase):
 
         self.assertTrue(self.console.armed)
         self.assertEqual(
-            self.arm.calls, [("disable",), ("folded",), ("enable",)]
+            self.arm.calls,
+            [("disable",), ("folded",), ("calibrate",), ("enable",)],
         )
 
     def test_degree_and_cartesian_commands(self):
@@ -97,6 +124,28 @@ class SwivelCutConsoleTests(unittest.TestCase):
 
         self.assertFalse(self.console.armed)
         self.assertFalse(self.arm.enabled)
+
+    def test_encoder_status_is_reported(self):
+        self.console.execute("ENC")
+
+        self.assertEqual(self.output[-1], "ENC J1=ok J2=ok J1=0.00 J2=180.00")
+
+    def test_teach_disarms_then_play_rearms(self):
+        self.console.execute("ARM FOLDED")
+        self.console.execute("TEACH 2 25")
+
+        self.assertFalse(self.console.armed)
+        self.assertIn(("teach", 2.0, 25.0), self.arm.calls)
+
+        self.console.execute("PLAY")
+
+        self.assertTrue(self.console.armed)
+        self.assertIn(("play",), self.arm.calls)
+
+    def test_clear_erases_taught_path(self):
+        self.console.execute("CLEAR")
+
+        self.assertIn(("clear",), self.arm.calls)
 
 
 if __name__ == "__main__":

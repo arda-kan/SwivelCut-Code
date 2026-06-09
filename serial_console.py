@@ -1,11 +1,13 @@
 """USB serial command console for the fixed SwivelCut arm."""
 
+from as5600 import EncoderError
 from swivelcut import SwivelCut
 
 
 HELP = """Commands:
   ARM FOLDED          confirm the physical folded pose and enable the drivers
   DISARM              disable both motor drivers
+  ENC                 print encoder magnet health and measured joint angles
   J1 <deg>            move shoulder to an absolute angle
   J2 <deg>            move elbow to an absolute angle
   ANGLES <j1> <j2>    move both joints to absolute angles
@@ -17,10 +19,15 @@ HELP = """Commands:
                       solve XY and move only J2
   CUT <x0> <y0> <x1> <y1> [UP|DOWN]
                       cut a straight Cartesian line
+  TEACH <seconds> [Hz]
+                      disable motors and record a hand-guided movement
+  PLAY                return to the taught start and replay the movement
+  CLEAR               erase the taught movement
   POS                 print x, y, J1 and J2
   HELP                show this list
 
 Angles are degrees. Positive angles are counterclockwise viewed from above.
+TEACH accepts 1-50 Hz and up to 60 seconds. The default is 20 Hz.
 """
 
 
@@ -54,13 +61,27 @@ class SwivelCutConsole:
                 raise ValueError("use ARM FOLDED after physically folding the arm")
             self.arm.disable()
             self.arm.set_folded_start()
+            self.arm.calibrate_encoders()
             self.arm.enable()
             self.armed = True
-            self.output("ARMED: folded pose set to J1=0.0, J2=180.0")
+            self.output(
+                "ARMED: encoders calibrated at folded J1=0.0, J2=180.0"
+            )
         elif command == "DISARM":
             self.arm.disable()
             self.armed = False
             self.output("DISARMED")
+        elif command == "ENC":
+            self._expect_count(parts, 1, "ENC")
+            j1_state, j2_state = self.arm.encoder_status()
+            try:
+                j1_deg, j2_deg = self.arm.encoder_angles()
+                angles = " J1={:.2f} J2={:.2f}".format(j1_deg, j2_deg)
+            except EncoderError:
+                angles = " angles=uncalibrated"
+            self.output(
+                "ENC J1={} J2={}{}".format(j1_state, j2_state, angles)
+            )
         elif command == "J1":
             self._require_armed()
             self._expect_count(parts, 2, "J1 <deg>")
@@ -99,6 +120,30 @@ class SwivelCutConsole:
             coordinates = [float(value) for value in parts[1:5]]
             self.arm.cut_line(*coordinates, elbow=elbow)
             self._print_position()
+        elif command == "TEACH":
+            self._require_armed()
+            if len(parts) not in (2, 3):
+                raise ValueError("use TEACH <seconds> [Hz]")
+            duration = float(parts[1])
+            sample_hz = float(parts[2]) if len(parts) == 3 else 20
+            self.output(
+                "TEACHING: motors disabled; guide the arm for {:.1f} s".format(
+                    duration
+                )
+            )
+            self.armed = False
+            count = self.arm.record_teach(duration, sample_hz)
+            self.output("TAUGHT: {} points recorded; type PLAY".format(count))
+        elif command == "PLAY":
+            self._expect_count(parts, 1, "PLAY")
+            count = self.arm.replay_teach()
+            self.armed = True
+            self.output("PLAYED: {} points".format(count))
+            self._print_position()
+        elif command == "CLEAR":
+            self._expect_count(parts, 1, "CLEAR")
+            self.arm.clear_teach()
+            self.output("TAUGHT MOVEMENT CLEARED")
         elif command == "POS":
             self._print_position()
         else:
@@ -135,6 +180,10 @@ def run_console():
         while True:
             try:
                 console.execute(input("swivelcut> "))
+            except EncoderError as error:
+                console.shutdown()
+                print("FEEDBACK FAULT:", error)
+                print("Fix the encoder issue, fold the arm, then type: ARM FOLDED")
             except (ValueError, TypeError) as error:
                 print("ERROR:", error)
     except (KeyboardInterrupt, EOFError):

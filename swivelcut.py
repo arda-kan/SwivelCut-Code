@@ -1,8 +1,10 @@
 """SwivelCut two-joint motion controller for MicroPython on ESP32."""
 
 import math
-from machine import Pin
-from time import sleep_us, ticks_us, ticks_diff, ticks_add
+from machine import Pin, SoftI2C
+from time import sleep_ms, sleep_us, ticks_ms, ticks_us, ticks_diff, ticks_add
+
+from as5600 import AS5600, EncoderError, MultiTurnEncoder
 
 # Machine dimensions and drive ratios
 L1 = 200.0          # shoulder pivot -> elbow pivot
@@ -41,6 +43,26 @@ PIN_J2_STEP = 32
 PIN_J2_DIR  = 33
 PIN_ENABLE  = 27               # shared /EN, active-LOW. Set to None if unused.
 
+# Each AS5600 has the fixed address 0x36, so the modules use separate buses.
+PIN_J1_ENCODER_SDA = 21
+PIN_J1_ENCODER_SCL = 22
+PIN_J2_ENCODER_SDA = 18
+PIN_J2_ENCODER_SCL = 19
+ENCODER_I2C_HZ = 400000
+
+# Change a sign if increasing the logical joint angle decreases its raw count.
+ENCODER_J1_SIGN = 1
+ENCODER_J2_SIGN = 1
+
+ENCODER_SAMPLE_STEPS = 256
+FEEDBACK_TOLERANCE_DEG = 0.25
+FEEDBACK_MAX_ERROR_DEG = 10.0
+FEEDBACK_MAX_CORRECTIONS = 3
+
+TEACH_DEFAULT_HZ = 20
+TEACH_MAX_HZ = 50
+TEACH_MAX_SECONDS = 60.0
+
 LINE_SEG_MM = 2.0              # straight cuts are split into segments this long
 
 TWO_PI = 2.0 * math.pi
@@ -64,16 +86,45 @@ class StepperAxis:
 
 
 class SwivelCut:
-    def __init__(self):
+    def __init__(self, encoders=None, auto_encoders=True):
         self.j1 = StepperAxis(PIN_J1_STEP, PIN_J1_DIR, STEPS_PER_RAD_J1, INVERT_J1)
         self.j2 = StepperAxis(PIN_J2_STEP, PIN_J2_DIR, STEPS_PER_RAD_J2, INVERT_J2)
         self.en = Pin(PIN_ENABLE, Pin.OUT, value=1) if PIN_ENABLE is not None else None
         self.L1 = L1
         self.L2 = L2
         self.coupling = COUPLING
+        self.encoder_i2c = None
+        if encoders is not None:
+            self.encoders = encoders
+        elif auto_encoders:
+            self.encoders = self._create_default_encoders()
+        else:
+            self.encoders = None
+        self.encoder_calibrated = False
+        self.feedback_fault = None
+        self.teach_points = []
         self.set_folded_start()
 
+    def _create_default_encoders(self):
+        j1_i2c = SoftI2C(
+            scl=Pin(PIN_J1_ENCODER_SCL),
+            sda=Pin(PIN_J1_ENCODER_SDA),
+            freq=ENCODER_I2C_HZ,
+        )
+        j2_i2c = SoftI2C(
+            scl=Pin(PIN_J2_ENCODER_SCL),
+            sda=Pin(PIN_J2_ENCODER_SDA),
+            freq=ENCODER_I2C_HZ,
+        )
+        self.encoder_i2c = (j1_i2c, j2_i2c)
+        return (
+            MultiTurnEncoder(AS5600(j1_i2c), ENCODER_J1_SIGN, "J1 encoder"),
+            MultiTurnEncoder(AS5600(j2_i2c), ENCODER_J2_SIGN, "J2 encoder"),
+        )
+
     def enable(self):
+        if self.feedback_fault:
+            raise EncoderError("feedback fault: " + self.feedback_fault)
         if self.en:
             self.en.value(0)
         sleep_us(2000)
@@ -153,22 +204,140 @@ class SwivelCut:
         self.t2 = math.radians(START_T2_DEG)
         self.j1.pos, self.j2.pos = self._angle_to_steps(self.t1, self.t2)
 
+    def _require_encoders(self):
+        if not self.encoders:
+            raise EncoderError("encoders are not configured")
+
+    def calibrate_encoders(self):
+        """Define the current encoder readings as the known folded pose."""
+        self._require_encoders()
+        self.encoder_calibrated = False
+        motor1 = self.t1 * GEAR_J1
+        motor2 = (self.t2 + self.coupling * self.t1) * GEAR_J2
+        try:
+            self.encoders[0].calibrate(motor1)
+            self.encoders[1].calibrate(motor2)
+        except (OSError, EncoderError) as error:
+            self._feedback_fail(str(error))
+        self.encoder_calibrated = True
+        self.feedback_fault = None
+        return self.encoder_angles()
+
+    def encoder_status(self):
+        self._require_encoders()
+        try:
+            return (
+                self.encoders[0].magnet_state(),
+                self.encoders[1].magnet_state(),
+            )
+        except OSError as error:
+            raise EncoderError("encoder I2C read failed: {}".format(error))
+
+    def _sample_encoders(self):
+        if not self.encoder_calibrated:
+            return None
+        try:
+            motor1 = self.encoders[0].update()
+            motor2 = self.encoders[1].update()
+        except (OSError, EncoderError) as error:
+            self._feedback_fail(str(error))
+        t1 = motor1 / GEAR_J1
+        t2 = motor2 / GEAR_J2 - self.coupling * t1
+        return t1, t2
+
+    def encoder_angles(self):
+        """Return measured J1 and J2 angles in degrees."""
+        measured = self._sample_encoders()
+        if measured is None:
+            raise EncoderError("encoders are not calibrated")
+        return math.degrees(measured[0]), math.degrees(measured[1])
+
+    def sync_from_encoders(self):
+        """Use measured shaft positions as the controller's current state."""
+        t1_deg, t2_deg = self.encoder_angles()
+        self._validate_angles(t1_deg, t2_deg)
+        self.t1 = math.radians(t1_deg)
+        self.t2 = math.radians(t2_deg)
+        self.j1.pos, self.j2.pos = self._angle_to_steps(self.t1, self.t2)
+        return t1_deg, t2_deg
+
+    def _feedback_fail(self, message):
+        self.feedback_fault = message
+        self.encoder_calibrated = False
+        self.disable()
+        raise EncoderError(message)
+
+    def _settle_feedback(self, target_t1, target_t2):
+        if not self.encoders:
+            return
+        if not self.encoder_calibrated:
+            self._feedback_fail("encoders are not calibrated")
+
+        tolerance = math.radians(FEEDBACK_TOLERANCE_DEG)
+        maximum = math.radians(FEEDBACK_MAX_ERROR_DEG)
+        previous_error = None
+        for attempt in range(FEEDBACK_MAX_CORRECTIONS + 1):
+            measured_t1, measured_t2 = self._sample_encoders()
+            error1 = target_t1 - measured_t1
+            error2 = target_t2 - measured_t2
+            worst_error = max(abs(error1), abs(error2))
+            if worst_error <= tolerance:
+                self.t1, self.t2 = measured_t1, measured_t2
+                self.j1.pos, self.j2.pos = self._angle_to_steps(self.t1, self.t2)
+                return
+            if worst_error > maximum:
+                self._feedback_fail(
+                    "encoder error too large: J1={:.2f} deg J2={:.2f} deg".format(
+                        math.degrees(error1), math.degrees(error2)
+                    )
+                )
+            if previous_error is not None and worst_error >= previous_error:
+                self._feedback_fail(
+                    "correction increased encoder error; check encoder signs "
+                    "and mechanics"
+                )
+            if attempt == FEEDBACK_MAX_CORRECTIONS:
+                break
+
+            previous_error = worst_error
+            self.t1, self.t2 = measured_t1, measured_t2
+            self.j1.pos, self.j2.pos = self._angle_to_steps(self.t1, self.t2)
+            target1, target2 = self._angle_to_steps(target_t1, target_t2)
+            self._execute(target1 - self.j1.pos, target2 - self.j2.pos)
+            self._sync_angles_from_steps()
+
+        self._feedback_fail(
+            "position did not settle within {:.2f} deg".format(
+                FEEDBACK_TOLERANCE_DEG
+            )
+        )
+
     def position(self):
         x, y = self.forward(self.t1, self.t2)
         return x, y, math.degrees(self.t1), math.degrees(self.t2)
 
-    def move_to_angles(self, t1_deg, t2_deg, ramp_in=True, ramp_out=True):
-        """Coordinated move of BOTH joints to absolute angles (deg)."""
+    def _move_to_angles_once(self, t1_deg, t2_deg, ramp_in=True, ramp_out=True):
         self._validate_angles(t1_deg, t2_deg)
         t1 = math.radians(t1_deg)
         t2 = math.radians(t2_deg)
         tgt1, tgt2 = self._angle_to_steps(t1, t2)
-        d1 = tgt1 - self.j1.pos
-        d2 = tgt2 - self.j2.pos
         try:
-            self._execute(d1, d2, ramp_in, ramp_out)
+            self._execute(tgt1 - self.j1.pos, tgt2 - self.j2.pos, ramp_in, ramp_out)
         finally:
             self._sync_angles_from_steps()
+        return t1, t2
+
+    def move_to_angles(
+        self, t1_deg, t2_deg, ramp_in=True, ramp_out=True, feedback=True
+    ):
+        """Coordinated move of BOTH joints to absolute angles (deg)."""
+        if self.encoders and not self.encoder_calibrated:
+            self._feedback_fail("encoders are not calibrated")
+        t1, t2 = self._move_to_angles_once(
+            t1_deg, t2_deg, ramp_in=ramp_in, ramp_out=ramp_out
+        )
+        if feedback:
+            self._settle_feedback(t1, t2)
 
     def move_joint(self, joint, angle_deg, relative=False):
         """Move one joint and hold the other."""
@@ -228,7 +397,78 @@ class SwivelCut:
             ramp_in = (i == 1)
             ramp_out = (i == n)
             self.move_to_angles(math.degrees(t1), math.degrees(t2),
-                                ramp_in=ramp_in, ramp_out=ramp_out)
+                                ramp_in=ramp_in, ramp_out=ramp_out,
+                                feedback=ramp_out)
+
+    def record_teach(self, duration_s, sample_hz=TEACH_DEFAULT_HZ):
+        """Record a hand-guided joint trajectory while the drivers are off."""
+        if not self.encoder_calibrated:
+            raise EncoderError("encoders are not calibrated")
+        if duration_s <= 0 or duration_s > TEACH_MAX_SECONDS:
+            raise ValueError(
+                "teach duration must be in (0, {}] seconds".format(
+                    int(TEACH_MAX_SECONDS)
+                )
+            )
+        if sample_hz <= 0 or sample_hz > TEACH_MAX_HZ:
+            raise ValueError(
+                "teach sample rate must be in (0, {}] Hz".format(TEACH_MAX_HZ)
+            )
+
+        self.disable()
+        interval_ms = max(1, int(round(1000.0 / sample_hz)))
+        duration_ms = int(round(duration_s * 1000.0))
+        start = ticks_ms()
+        next_sample = start
+        points = []
+        while True:
+            now = ticks_ms()
+            remaining = ticks_diff(next_sample, now)
+            if remaining > 0:
+                sleep_ms(remaining)
+                now = ticks_ms()
+            elapsed = ticks_diff(now, start)
+            t1_deg, t2_deg = self.encoder_angles()
+            self._validate_angles(t1_deg, t2_deg)
+            points.append((elapsed, t1_deg, t2_deg))
+            if elapsed >= duration_ms:
+                break
+            next_sample = ticks_add(next_sample, interval_ms)
+
+        self.teach_points = points
+        self.sync_from_encoders()
+        return len(points)
+
+    def replay_teach(self):
+        """Return to the recorded start and reproduce the taught trajectory."""
+        if len(self.teach_points) < 2:
+            raise ValueError("no taught movement; use TEACH first")
+        if not self.encoder_calibrated:
+            raise EncoderError("encoders are not calibrated")
+
+        for _elapsed, t1_deg, t2_deg in self.teach_points:
+            self._validate_angles(t1_deg, t2_deg)
+
+        self.enable()
+        first = self.teach_points[0]
+        self.move_to_angles(first[1], first[2])
+        replay_start = ticks_ms()
+        for index in range(1, len(self.teach_points)):
+            elapsed, t1_deg, t2_deg = self.teach_points[index]
+            final = index == len(self.teach_points) - 1
+            self._move_to_angles_once(
+                t1_deg, t2_deg, ramp_in=False, ramp_out=final
+            )
+            wait_ms = ticks_diff(ticks_add(replay_start, elapsed), ticks_ms())
+            if wait_ms > 0:
+                sleep_ms(wait_ms)
+
+        target = self.teach_points[-1]
+        self._settle_feedback(math.radians(target[1]), math.radians(target[2]))
+        return len(self.teach_points)
+
+    def clear_teach(self):
+        self.teach_points = []
 
     def _execute(self, d1, d2, ramp_in=True, ramp_out=True):
         """Send a coordinated pair of step counts to the drivers."""
@@ -306,6 +546,11 @@ class SwivelCut:
                 self.j2.pos += s2
                 if do1:
                     self.j1.pos += s1
+
+            if self.encoder_calibrated and (
+                (i + 1) % ENCODER_SAMPLE_STEPS == 0 or i + 1 == total
+            ):
+                self._sample_encoders()
 
             t_next = ticks_add(t_next, int(c))
             while ticks_diff(ticks_us(), t_next) < 0:
