@@ -60,8 +60,8 @@ independent software-I2C buses:
 
 | Encoder | SDA | SCL |
 | --- | ---: | ---: |
-| J1 motor shaft | GPIO 21 | GPIO 22 |
-| J2 motor shaft | GPIO 18 | GPIO 19 |
+| J1 motor shaft | GPIO 16 | GPIO 17 |
+| J2 motor shaft | GPIO 14 | GPIO 13 |
 
 Wire the module pins as follows:
 
@@ -69,8 +69,8 @@ Wire the module pins as follows:
 | --- | --- |
 | VCC | ESP32 `3V3` |
 | GND | ESP32 `GND` |
-| SDA | ESP32 `GPIO 21` |
-| SCL | ESP32 `GPIO 22` |
+| SDA | ESP32 `GPIO 16` |
+| SCL | ESP32 `GPIO 17` |
 | DIR | Leave disconnected |
 | OUT | Leave disconnected |
 
@@ -78,8 +78,8 @@ Wire the module pins as follows:
 | --- | --- |
 | VCC | ESP32 `3V3` |
 | GND | ESP32 `GND` |
-| SDA | ESP32 `GPIO 18` |
-| SCL | ESP32 `GPIO 19` |
+| SDA | ESP32 `GPIO 14` |
+| SCL | ESP32 `GPIO 13` |
 | DIR | Leave disconnected |
 | OUT | Leave disconnected |
 
@@ -147,8 +147,8 @@ python3 -m mpremote connect auto run encoder_test.py
 The expected startup output contains address `0x36` on both buses:
 
 ```text
-J1 bus: SDA=GPIO21 SCL=GPIO22 devices=['0x36']
-J2 bus: SDA=GPIO18 SCL=GPIO19 devices=['0x36']
+J1 bus: SDA=GPIO16 SCL=GPIO17 devices=['0x36']
+J2 bus: SDA=GPIO14 SCL=GPIO13 devices=['0x36']
 Both encoders found. Press Ctrl-C to stop.
 ```
 

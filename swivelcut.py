@@ -44,10 +44,10 @@ PIN_J2_DIR  = 33
 PIN_ENABLE  = 27               # shared /EN, active-LOW. Set to None if unused.
 
 # Each AS5600 has the fixed address 0x36, so the modules use separate buses.
-PIN_J1_ENCODER_SDA = 21
-PIN_J1_ENCODER_SCL = 22
-PIN_J2_ENCODER_SDA = 18
-PIN_J2_ENCODER_SCL = 19
+PIN_J1_ENCODER_SDA = 16
+PIN_J1_ENCODER_SCL = 17
+PIN_J2_ENCODER_SDA = 14
+PIN_J2_ENCODER_SCL = 13
 ENCODER_I2C_HZ = 400000
 
 # Change a sign if increasing the logical joint angle decreases its raw count.

@@ -9,8 +9,8 @@ REG_STATUS = 0x0B
 REG_RAW_ANGLE = 0x0C
 
 ENCODERS = (
-    ("J1", 21, 22),  # name, SDA, SCL
-    ("J2", 18, 19),
+    ("J1", 16, 17),  # name, SDA, SCL
+    ("J2", 14, 13),
 )
 
 
