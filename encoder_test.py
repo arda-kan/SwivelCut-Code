@@ -44,9 +44,13 @@ def create_bus(name, sda, scl):
         )
     )
     if AS5600_ADDRESS not in devices:
-        raise RuntimeError(
-            "{} AS5600 not found; expected address 0x36".format(name)
+        print("{} ERROR: AS5600 not found; expected address 0x36".format(name))
+        print(
+            "{} CHECK: 3V3->VCC, GND->GND, GPIO{}->SDA, GPIO{}->SCL".format(
+                name, sda, scl
+            )
         )
+        return None
     return i2c
 
 
@@ -55,9 +59,17 @@ def main():
     print("Keep motor power OFF and rotate the shafts slowly by hand.")
     buses = []
     for name, sda, scl in ENCODERS:
-        buses.append((name, create_bus(name, sda, scl)))
+        i2c = create_bus(name, sda, scl)
+        if i2c is not None:
+            buses.append((name, i2c))
 
-    print("Both encoders found. Press Ctrl-C to stop.")
+    if len(buses) != len(ENCODERS):
+        print("Fix the missing encoder wiring, disconnect USB, then test again.")
+    if not buses:
+        print("No encoders found. Test one module at a time.")
+        return
+
+    print("{} encoder(s) found. Press Ctrl-C to stop.".format(len(buses)))
     try:
         while True:
             values = []

@@ -167,6 +167,20 @@ If one bus does not list `0x36`, switch power off and check VCC, GND, SDA, and
 SCL for that module. Do not move wiring while it is powered. Stop the test with
 `Ctrl-C`.
 
+For `devices=[]`, use this order:
+
+1. Disconnect USB and motor power.
+2. Remove J2 completely and test only J1.
+3. Check continuity from the ESP32 pin itself to the sensor header; do not rely
+   only on breadboard row alignment.
+4. Confirm the sensor receives about 3.3 V between its VCC and GND pins.
+5. Confirm SDA and SCL are not swapped and neither is shorted to GND or 3.3 V.
+6. Try the other AS5600 module on the same J1 wires. If the second module works,
+   the first module or its solder joints are faulty.
+
+Do not connect external pull-up resistors until the module has been inspected.
+Most AS5600 breakout boards already include I2C pull-ups.
+
 ### 2. Install the computer tools
 
 On macOS Terminal:
