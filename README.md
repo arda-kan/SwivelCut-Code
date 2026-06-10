@@ -27,6 +27,10 @@ and use `ARM J1`. This mode calibrates and monitors only J1. It accepts direct
 Cartesian, and cutting commands remain blocked. Normal `ARM FOLDED` operation
 still requires both encoders.
 
+`ARM J1` permits an unstable initial angle reading so temporary hardware can
+still be tested. This bypasses only the calibration stability check; large
+feedback errors during powered movement still disable the driver.
+
 ## Current capabilities
 
 - Coordinated absolute shoulder and elbow moves with acceleration ramps

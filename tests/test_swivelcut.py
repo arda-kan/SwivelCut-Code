@@ -218,7 +218,7 @@ class SwivelCutTests(unittest.TestCase):
                 self.calibrated = False
                 self.updates = 0
 
-            def calibrate(self, _known_angle):
+            def calibrate(self, _known_angle, **_kwargs):
                 self.calibrated = True
 
             def update(self):
@@ -241,7 +241,7 @@ class SwivelCutTests(unittest.TestCase):
 
     def test_j1_only_mode_blocks_j2_motion(self):
         class FakeEncoder:
-            def calibrate(self, _known_angle):
+            def calibrate(self, _known_angle, **_kwargs):
                 pass
 
             def update(self):

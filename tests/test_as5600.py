@@ -78,6 +78,14 @@ class AS5600Tests(unittest.TestCase):
         with self.assertRaisesRegex(EncoderError, "reading is unstable"):
             encoder.calibrate(0.0)
 
+    def test_unstable_calibration_can_be_allowed_for_j1_testing(self):
+        sensor = AS5600(FakeI2C([100, 100, 100, 500, 100, 500, 100, 100]))
+        encoder = MultiTurnEncoder(sensor, name="J1 encoder")
+
+        encoder.calibrate(0.0, require_stable=False)
+
+        self.assertAlmostEqual(encoder.update(), 0.0)
+
     def test_calibration_ignores_initial_stale_samples(self):
         sensor = AS5600(FakeI2C([900, 400, 100, 101, 100, 101, 100, 100]))
         encoder = MultiTurnEncoder(sensor)

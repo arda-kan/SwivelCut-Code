@@ -237,7 +237,7 @@ class SwivelCut:
         self.encoder_mode = None
         motor1 = self.t1 * GEAR_J1
         try:
-            self.encoders[0].calibrate(motor1)
+            self.encoders[0].calibrate(motor1, require_stable=False)
         except (OSError, EncoderError) as error:
             self._feedback_fail(str(error))
         self.encoder_calibrated = True
