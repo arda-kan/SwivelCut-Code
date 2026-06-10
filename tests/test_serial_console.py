@@ -33,6 +33,9 @@ class FakeArm:
     def calibrate_encoders(self):
         self.calls.append(("calibrate",))
 
+    def calibrate_j1_encoder(self):
+        self.calls.append(("calibrate_j1",))
+
     def encoder_status(self):
         return "ok", "ok"
 
@@ -101,6 +104,25 @@ class SwivelCutConsoleTests(unittest.TestCase):
             self.arm.calls,
             [("disable",), ("folded",), ("calibrate",), ("enable",)],
         )
+
+    def test_arm_j1_calibrates_only_j1_and_blocks_other_motion(self):
+        self.console.execute("ARM J1")
+        self.console.execute("J1 10")
+
+        self.assertEqual(
+            self.arm.calls,
+            [
+                ("disable",),
+                ("folded",),
+                ("calibrate_j1",),
+                ("enable",),
+                ("joint", 1, 10.0),
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "only J1"):
+            self.console.execute("J2 10")
+        with self.assertRaisesRegex(ValueError, "only J1"):
+            self.console.execute("XYJ1 100 100")
 
     def test_degree_and_cartesian_commands(self):
         self.console.execute("ARM FOLDED")

@@ -211,6 +211,48 @@ class SwivelCutTests(unittest.TestCase):
         self.assertGreater(corrections[0][0], 0)
         self.assertIsNone(arm.feedback_fault)
 
+    def test_j1_only_mode_calibrates_and_never_reads_j2(self):
+        class FakeEncoder:
+            def __init__(self, value):
+                self.value = value
+                self.calibrated = False
+                self.updates = 0
+
+            def calibrate(self, _known_angle):
+                self.calibrated = True
+
+            def update(self):
+                self.updates += 1
+                return self.value
+
+            def magnet_state(self):
+                return "ok"
+
+        j1 = FakeEncoder(0.0)
+        j2 = FakeEncoder(math.radians(180) * swivelcut.GEAR_J2)
+        arm = swivelcut.SwivelCut(encoders=(j1, j2))
+
+        arm.calibrate_j1_encoder()
+
+        self.assertTrue(j1.calibrated)
+        self.assertFalse(j2.calibrated)
+        self.assertEqual(j2.updates, 0)
+        self.assertEqual(arm.encoder_status(), ("ok", "not installed"))
+
+    def test_j1_only_mode_blocks_j2_motion(self):
+        class FakeEncoder:
+            def calibrate(self, _known_angle):
+                pass
+
+            def update(self):
+                return 0.0
+
+        arm = swivelcut.SwivelCut(encoders=(FakeEncoder(), FakeEncoder()))
+        arm.calibrate_j1_encoder()
+
+        with self.assertRaisesRegex(Exception, "blocks J2 motion"):
+            arm.move_joint(2, 170)
+
     def test_large_encoder_error_disables_drivers(self):
         class FakeEncoder:
             def __init__(self, value):
