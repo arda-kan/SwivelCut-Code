@@ -61,7 +61,7 @@ independent software-I2C buses:
 | Encoder | SDA | SCL |
 | --- | ---: | ---: |
 | J1 motor shaft | GPIO 16 | GPIO 17 |
-| J2 motor shaft | GPIO 14 | GPIO 13 |
+| J2 motor shaft | GPIO 21 | GPIO 22 |
 
 Wire the module pins as follows:
 
@@ -78,8 +78,8 @@ Wire the module pins as follows:
 | --- | --- |
 | VCC | ESP32 `3V3` |
 | GND | ESP32 `GND` |
-| SDA | ESP32 `GPIO 14` |
-| SCL | ESP32 `GPIO 13` |
+| SDA | ESP32 `GPIO 21` |
+| SCL | ESP32 `GPIO 22` |
 | DIR | Leave disconnected |
 | OUT | Leave disconnected |
 
@@ -148,7 +148,7 @@ The expected startup output contains address `0x36` on both buses:
 
 ```text
 J1 bus: SDA=GPIO16 SCL=GPIO17 devices=['0x36']
-J2 bus: SDA=GPIO14 SCL=GPIO13 devices=['0x36']
+J2 bus: SDA=GPIO21 SCL=GPIO22 devices=['0x36']
 Both encoders found. Press Ctrl-C to stop.
 ```
 
