@@ -1,6 +1,7 @@
 """SwivelCut two-joint motion controller for MicroPython on ESP32."""
 
 import math
+from array import array
 from machine import Pin, SoftI2C
 from time import sleep_ms, sleep_us, ticks_ms, ticks_us, ticks_diff, ticks_add
 
@@ -62,6 +63,8 @@ FEEDBACK_MAX_CORRECTIONS = 3
 TEACH_DEFAULT_HZ = 20
 TEACH_MAX_HZ = 50
 TEACH_MAX_SECONDS = 60.0
+TEACH_SMOOTHING_MS = 150.0
+TEACH_MAX_DEVIATION_DEG = 1.0
 
 LINE_SEG_MM = 2.0              # straight cuts are split into segments this long
 
@@ -400,7 +403,65 @@ class SwivelCut:
                                 ramp_in=ramp_in, ramp_out=ramp_out,
                                 feedback=ramp_out)
 
-    def record_teach(self, duration_s, sample_hz=TEACH_DEFAULT_HZ):
+    @staticmethod
+    def stabilize_teach_points(
+        points,
+        smoothing_ms=TEACH_SMOOTHING_MS,
+        max_deviation_deg=TEACH_MAX_DEVIATION_DEG,
+    ):
+        """Smooth a recorded joint path without adding timing lag."""
+        if smoothing_ms < 0:
+            raise ValueError("teach smoothing must be zero or greater")
+        if max_deviation_deg < 0:
+            raise ValueError("teach maximum deviation must be zero or greater")
+        if len(points) < 3 or smoothing_ms == 0 or max_deviation_deg == 0:
+            return list(points)
+
+        tau_ms = float(smoothing_ms)
+
+        def smooth_axis(axis):
+            forward = array("f", [points[0][axis]])
+            for index in range(1, len(points)):
+                dt_ms = max(1, points[index][0] - points[index - 1][0])
+                alpha = dt_ms / (tau_ms + dt_ms)
+                value = forward[-1] + alpha * (points[index][axis] - forward[-1])
+                forward.append(value)
+
+            backward = array("f", [0.0] * len(points))
+            backward[-1] = points[-1][axis]
+            for index in range(len(points) - 2, -1, -1):
+                dt_ms = max(1, points[index + 1][0] - points[index][0])
+                alpha = dt_ms / (tau_ms + dt_ms)
+                backward[index] = (
+                    backward[index + 1]
+                    + alpha * (points[index][axis] - backward[index + 1])
+                )
+
+            result = array("f")
+            for index, point in enumerate(points):
+                raw = point[axis]
+                filtered = 0.5 * (forward[index] + backward[index])
+                lower = raw - max_deviation_deg
+                upper = raw + max_deviation_deg
+                result.append(max(lower, min(upper, filtered)))
+            result[0] = points[0][axis]
+            result[-1] = points[-1][axis]
+            return result
+
+        j1 = smooth_axis(1)
+        j2 = smooth_axis(2)
+        return [
+            (point[0], j1[index], j2[index])
+            for index, point in enumerate(points)
+        ]
+
+    def record_teach(
+        self,
+        duration_s,
+        sample_hz=TEACH_DEFAULT_HZ,
+        smoothing_ms=TEACH_SMOOTHING_MS,
+        max_deviation_deg=TEACH_MAX_DEVIATION_DEG,
+    ):
         """Record a hand-guided joint trajectory while the drivers are off."""
         if not self.encoder_calibrated:
             raise EncoderError("encoders are not calibrated")
@@ -414,6 +475,10 @@ class SwivelCut:
             raise ValueError(
                 "teach sample rate must be in (0, {}] Hz".format(TEACH_MAX_HZ)
             )
+        if smoothing_ms < 0:
+            raise ValueError("teach smoothing must be zero or greater")
+        if max_deviation_deg < 0:
+            raise ValueError("teach maximum deviation must be zero or greater")
 
         self.disable()
         interval_ms = max(1, int(round(1000.0 / sample_hz)))
@@ -435,7 +500,9 @@ class SwivelCut:
                 break
             next_sample = ticks_add(next_sample, interval_ms)
 
-        self.teach_points = points
+        self.teach_points = self.stabilize_teach_points(
+            points, smoothing_ms, max_deviation_deg
+        )
         self.sync_from_encoders()
         return len(points)
 

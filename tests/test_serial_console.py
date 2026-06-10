@@ -54,8 +54,18 @@ class FakeArm:
     def cut_line(self, x0, y0, x1, y1, elbow):
         self.calls.append(("cut", x0, y0, x1, y1, elbow))
 
-    def record_teach(self, duration, sample_hz):
-        self.calls.append(("teach", duration, sample_hz))
+    def record_teach(
+        self, duration, sample_hz, smoothing_ms, max_deviation_deg
+    ):
+        self.calls.append(
+            (
+                "teach",
+                duration,
+                sample_hz,
+                smoothing_ms,
+                max_deviation_deg,
+            )
+        )
         self.enabled = False
         self.taught = [(0, 0, 180), (1000, 10, 160)]
         return len(self.taught)
@@ -135,12 +145,18 @@ class SwivelCutConsoleTests(unittest.TestCase):
         self.console.execute("TEACH 2 25")
 
         self.assertFalse(self.console.armed)
-        self.assertIn(("teach", 2.0, 25.0), self.arm.calls)
+        self.assertIn(("teach", 2.0, 25.0, 150.0, 1.0), self.arm.calls)
 
         self.console.execute("PLAY")
 
         self.assertTrue(self.console.armed)
         self.assertIn(("play",), self.arm.calls)
+
+    def test_teach_stabilization_can_be_tuned(self):
+        self.console.execute("ARM FOLDED")
+        self.console.execute("TEACH 3 40 250 0.4")
+
+        self.assertIn(("teach", 3.0, 40.0, 250.0, 0.4), self.arm.calls)
 
     def test_clear_erases_taught_path(self):
         self.console.execute("CLEAR")

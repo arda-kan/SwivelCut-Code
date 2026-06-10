@@ -333,7 +333,10 @@ TEACH 5 20
 
 `TEACH` immediately disables the drivers. Guide the arm during the requested
 window, keeping both joints inside their software limits. When recording ends,
-the drivers remain disabled. Replay with:
+the drivers remain disabled. The recorded joint path is stabilized before it is
+stored: smoothing runs both forward and backward, so jitter is reduced without
+adding timing lag, and the first and last positions are kept exactly. Replay
+with:
 
 ```text
 PLAY
@@ -348,6 +351,35 @@ The configured 1500 microstep/s ceiling gives maximum joint speeds of about
 those limits cannot be reproduced at the original timing; replay preserves the
 joint path but will take longer. The default recording rate is 20 Hz, the
 allowed range is 1-50 Hz, and the maximum duration is 60 seconds.
+
+Stabilization is tuneable from the `TEACH` command:
+
+```text
+TEACH <seconds> [Hz] [smooth_ms] [max_deviation_deg]
+```
+
+The defaults are `150 ms` smoothing and `1.0 degree` maximum deviation.
+
+- `smooth_ms` controls how much time-neighbouring samples influence each other.
+  Increase it to remove slower hand tremor; decrease it to retain sharper,
+  quicker details. Start around `100-200 ms`. Values around `300-500 ms` are
+  stronger but will soften deliberate corners.
+- `max_deviation_deg` limits how far either stabilized joint angle may move from
+  its measured value. Decrease it to preserve the taught shape more strictly;
+  increase it when encoder noise is larger. A useful starting range is
+  `0.5-1.0` degrees.
+- Set either value to `0` to disable stabilization and retain raw samples.
+- Tune at the normal recording rate. A higher sample rate captures more detail
+  but does not by itself remove jitter.
+
+For example, use stronger smoothing with tighter shape protection:
+
+```text
+TEACH 5 30 250 0.5
+```
+
+Stabilization filters the recorded command path; it cannot remove mechanical
+play, blade flex, or encoder errors that are not visible at the motor shafts.
 
 Keep holding clear after `PLAY`: returning from the taught end pose to its
 starting pose is an automatic motor move. Teach/replay is joint-space motion,

@@ -1,7 +1,12 @@
 """USB serial command console for the fixed SwivelCut arm."""
 
 from as5600 import EncoderError
-from swivelcut import SwivelCut
+from swivelcut import (
+    SwivelCut,
+    TEACH_DEFAULT_HZ,
+    TEACH_MAX_DEVIATION_DEG,
+    TEACH_SMOOTHING_MS,
+)
 
 
 HELP = """Commands:
@@ -19,7 +24,7 @@ HELP = """Commands:
                       solve XY and move only J2
   CUT <x0> <y0> <x1> <y1> [UP|DOWN]
                       cut a straight Cartesian line
-  TEACH <seconds> [Hz]
+  TEACH <seconds> [Hz] [smooth_ms] [max_deviation_deg]
                       disable motors and record a hand-guided movement
   PLAY                return to the taught start and replay the movement
   CLEAR               erase the taught movement
@@ -27,7 +32,8 @@ HELP = """Commands:
   HELP                show this list
 
 Angles are degrees. Positive angles are counterclockwise viewed from above.
-TEACH accepts 1-50 Hz and up to 60 seconds. The default is 20 Hz.
+TEACH defaults: 20 Hz, 150 ms smoothing, 1.0 degree maximum deviation.
+Set smooth_ms or max_deviation_deg to 0 to keep the raw recording.
 """
 
 
@@ -122,17 +128,32 @@ class SwivelCutConsole:
             self._print_position()
         elif command == "TEACH":
             self._require_armed()
-            if len(parts) not in (2, 3):
-                raise ValueError("use TEACH <seconds> [Hz]")
+            if len(parts) < 2 or len(parts) > 5:
+                raise ValueError(
+                    "use TEACH <seconds> [Hz] [smooth_ms] [max_deviation_deg]"
+                )
             duration = float(parts[1])
-            sample_hz = float(parts[2]) if len(parts) == 3 else 20
+            sample_hz = (
+                float(parts[2]) if len(parts) >= 3 else TEACH_DEFAULT_HZ
+            )
+            smoothing_ms = (
+                float(parts[3]) if len(parts) >= 4 else TEACH_SMOOTHING_MS
+            )
+            max_deviation_deg = (
+                float(parts[4])
+                if len(parts) >= 5
+                else TEACH_MAX_DEVIATION_DEG
+            )
             self.output(
-                "TEACHING: motors disabled; guide the arm for {:.1f} s".format(
-                    duration
+                "TEACHING: motors disabled; guide the arm for {:.1f} s "
+                "(smooth={:.0f} ms, max deviation={:.2f} deg)".format(
+                    duration, smoothing_ms, max_deviation_deg
                 )
             )
             self.armed = False
-            count = self.arm.record_teach(duration, sample_hz)
+            count = self.arm.record_teach(
+                duration, sample_hz, smoothing_ms, max_deviation_deg
+            )
             self.output("TAUGHT: {} points recorded; type PLAY".format(count))
         elif command == "PLAY":
             self._expect_count(parts, 1, "PLAY")

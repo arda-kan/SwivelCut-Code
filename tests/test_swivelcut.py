@@ -272,6 +272,44 @@ class SwivelCutTests(unittest.TestCase):
 
         self.assertEqual(arm.en.value(), 1)
 
+    def test_teach_stabilizer_reduces_jitter_and_preserves_endpoints(self):
+        points = [
+            (0, 0.0, 100.0),
+            (50, 1.4, 98.6),
+            (100, 1.6, 98.4),
+            (150, 3.4, 96.6),
+            (200, 4.0, 96.0),
+        ]
+
+        filtered = swivelcut.SwivelCut.stabilize_teach_points(
+            points, smoothing_ms=150, max_deviation_deg=1.0
+        )
+
+        self.assertEqual(filtered[0], points[0])
+        self.assertEqual(filtered[-1], points[-1])
+        raw_jitter = abs(points[1][1] - 1.0) + abs(points[2][1] - 2.0)
+        filtered_jitter = (
+            abs(filtered[1][1] - 1.0) + abs(filtered[2][1] - 2.0)
+        )
+        self.assertLess(filtered_jitter, raw_jitter)
+
+    def test_teach_stabilizer_limits_shape_change(self):
+        points = [
+            (0, 0.0, 0.0),
+            (50, 0.0, 0.0),
+            (100, 10.0, -10.0),
+            (150, 10.0, -10.0),
+            (200, 10.0, -10.0),
+        ]
+
+        filtered = swivelcut.SwivelCut.stabilize_teach_points(
+            points, smoothing_ms=500, max_deviation_deg=0.25
+        )
+
+        for raw, stable in zip(points, filtered):
+            self.assertLessEqual(abs(raw[1] - stable[1]), 0.25)
+            self.assertLessEqual(abs(raw[2] - stable[2]), 0.25)
+
 
 if __name__ == "__main__":
     unittest.main()
