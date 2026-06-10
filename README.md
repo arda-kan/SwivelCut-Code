@@ -22,9 +22,10 @@ The folded pose is a kinematic singularity at `(0, 0)`. Use a joint-space or
 point-to-point move to unfold the arm before calling `cut_line()`.
 
 For temporary bench testing with only the J1 encoder installed, fold the arm
-and use `ARM J1`. This mode calibrates and monitors only J1 and accepts only
-`J1 <deg>` motor commands. J2, Cartesian, cutting, teach, and replay commands
-remain blocked. Normal `ARM FOLDED` operation still requires both encoders.
+and use `ARM J1`. This mode calibrates and monitors only J1. It accepts direct
+`J1 <deg>` moves and J1-only `TEACH`/`PLAY`, while holding J2 fixed. J2,
+Cartesian, and cutting commands remain blocked. Normal `ARM FOLDED` operation
+still requires both encoders.
 
 ## Current capabilities
 
@@ -286,6 +287,8 @@ setting in `swivelcut.py`, upload the file again, and reset.
 ```text
 ARM J1
 J1 5
+TEACH 5
+PLAY
 DISARM
 ANGLES 30 120
 J1 -20

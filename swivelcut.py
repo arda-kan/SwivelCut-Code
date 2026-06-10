@@ -499,8 +499,6 @@ class SwivelCut:
         """Record a hand-guided joint trajectory while the drivers are off."""
         if not self.encoder_calibrated:
             raise EncoderError("encoders are not calibrated")
-        if self.encoder_mode == "j1":
-            raise EncoderError("TEACH requires both encoders")
         if duration_s <= 0 or duration_s > TEACH_MAX_SECONDS:
             raise ValueError(
                 "teach duration must be in (0, {}] seconds".format(
@@ -548,11 +546,14 @@ class SwivelCut:
             raise ValueError("no taught movement; use TEACH first")
         if not self.encoder_calibrated:
             raise EncoderError("encoders are not calibrated")
-        if self.encoder_mode == "j1":
-            raise EncoderError("PLAY requires both encoders")
 
         for _elapsed, t1_deg, t2_deg in self.teach_points:
             self._validate_angles(t1_deg, t2_deg)
+            if (
+                self.encoder_mode == "j1"
+                and abs(t2_deg - math.degrees(self.t2)) > 1e-9
+            ):
+                raise EncoderError("J1 taught movement cannot move J2")
 
         self.enable()
         first = self.teach_points[0]
