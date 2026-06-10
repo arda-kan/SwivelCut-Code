@@ -107,6 +107,7 @@ class SwivelCut:
         self.encoder_mode = None
         self.feedback_fault = None
         self.teach_points = []
+        self.teach_mode = None
         self.set_folded_start()
 
     def _create_default_encoders(self):
@@ -495,10 +496,17 @@ class SwivelCut:
         sample_hz=TEACH_DEFAULT_HZ,
         smoothing_ms=TEACH_SMOOTHING_MS,
         max_deviation_deg=TEACH_MAX_DEVIATION_DEG,
+        j1_only=False,
     ):
         """Record a hand-guided joint trajectory while the drivers are off."""
         if not self.encoder_calibrated:
             raise EncoderError("encoders are not calibrated")
+        if j1_only and self.encoder_mode != "j1":
+            raise EncoderError("TEACH J1 requires ARM J1")
+        if not j1_only and self.encoder_mode == "j1":
+            raise EncoderError(
+                "TEACH requires both encoders; use TEACH J1 for J1 only"
+            )
         if duration_s <= 0 or duration_s > TEACH_MAX_SECONDS:
             raise ValueError(
                 "teach duration must be in (0, {}] seconds".format(
@@ -537,6 +545,7 @@ class SwivelCut:
         self.teach_points = self.stabilize_teach_points(
             points, smoothing_ms, max_deviation_deg
         )
+        self.teach_mode = "j1" if j1_only else "dual"
         self.sync_from_encoders()
         return len(points)
 
@@ -546,11 +555,15 @@ class SwivelCut:
             raise ValueError("no taught movement; use TEACH first")
         if not self.encoder_calibrated:
             raise EncoderError("encoders are not calibrated")
+        if self.teach_mode == "j1" and self.encoder_mode != "j1":
+            raise EncoderError("J1 taught movement requires ARM J1")
+        if self.teach_mode != "j1" and self.encoder_mode == "j1":
+            raise EncoderError("dual-joint taught movement requires both encoders")
 
         for _elapsed, t1_deg, t2_deg in self.teach_points:
             self._validate_angles(t1_deg, t2_deg)
             if (
-                self.encoder_mode == "j1"
+                self.teach_mode == "j1"
                 and abs(t2_deg - math.degrees(self.t2)) > 1e-9
             ):
                 raise EncoderError("J1 taught movement cannot move J2")
@@ -575,6 +588,7 @@ class SwivelCut:
 
     def clear_teach(self):
         self.teach_points = []
+        self.teach_mode = None
 
     def _execute(self, d1, d2, ramp_in=True, ramp_out=True):
         """Send a coordinated pair of step counts to the drivers."""

@@ -23,7 +23,7 @@ point-to-point move to unfold the arm before calling `cut_line()`.
 
 For temporary bench testing with only the J1 encoder installed, fold the arm
 and use `ARM J1`. This mode calibrates and monitors only J1. It accepts direct
-`J1 <deg>` moves and J1-only `TEACH`/`PLAY`, while holding J2 fixed. J2,
+`J1 <deg>` moves and explicit `TEACH J1`/`PLAY`, while holding J2 fixed. J2,
 Cartesian, and cutting commands remain blocked. Normal `ARM FOLDED` operation
 still requires both encoders.
 
@@ -287,7 +287,7 @@ setting in `swivelcut.py`, upload the file again, and reset.
 ```text
 ARM J1
 J1 5
-TEACH 5
+TEACH J1 5
 PLAY
 DISARM
 ANGLES 30 120

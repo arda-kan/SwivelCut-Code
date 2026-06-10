@@ -262,6 +262,7 @@ class SwivelCutTests(unittest.TestCase):
         arm.encoder_calibrated = True
         arm.encoder_mode = "j1"
         arm.teach_points = [(0, 0.0, 180.0), (0, 1.0, 180.0)]
+        arm.teach_mode = "j1"
         arm._settle_feedback = lambda _t1, _t2: None
         executed = []
 
@@ -286,9 +287,19 @@ class SwivelCutTests(unittest.TestCase):
         arm.encoder_calibrated = True
         arm.encoder_mode = "j1"
         arm.teach_points = [(0, 0.0, 180.0), (100, 1.0, 170.0)]
+        arm.teach_mode = "j1"
 
         with self.assertRaisesRegex(Exception, "cannot move J2"):
             arm.replay_teach()
+
+    def test_j1_mode_requires_explicit_j1_teach_option(self):
+        arm = swivelcut.SwivelCut(auto_encoders=False)
+        arm.encoders = (object(), object())
+        arm.encoder_calibrated = True
+        arm.encoder_mode = "j1"
+
+        with self.assertRaisesRegex(Exception, "use TEACH J1"):
+            arm.record_teach(1)
 
     def test_large_encoder_error_disables_drivers(self):
         class FakeEncoder:

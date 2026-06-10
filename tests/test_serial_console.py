@@ -58,7 +58,12 @@ class FakeArm:
         self.calls.append(("cut", x0, y0, x1, y1, elbow))
 
     def record_teach(
-        self, duration, sample_hz, smoothing_ms, max_deviation_deg
+        self,
+        duration,
+        sample_hz,
+        smoothing_ms,
+        max_deviation_deg,
+        j1_only=False,
     ):
         self.calls.append(
             (
@@ -67,6 +72,7 @@ class FakeArm:
                 sample_hz,
                 smoothing_ms,
                 max_deviation_deg,
+                j1_only,
             )
         )
         self.enabled = False
@@ -126,12 +132,15 @@ class SwivelCutConsoleTests(unittest.TestCase):
 
     def test_arm_j1_can_teach_and_replay(self):
         self.console.execute("ARM J1")
-        self.console.execute("TEACH 2 25")
+        with self.assertRaisesRegex(ValueError, "TEACH J1"):
+            self.console.execute("TEACH 2 25")
+        self.console.execute("TEACH J1 2 25")
 
         self.assertFalse(self.console.armed)
         self.assertEqual(self.console.arm_mode, "j1")
         teach_call = next(call for call in self.arm.calls if call[0] == "teach")
         self.assertEqual(teach_call[:3], ("teach", 2.0, 25.0))
+        self.assertTrue(teach_call[-1])
 
         self.console.execute("PLAY")
 
@@ -182,7 +191,9 @@ class SwivelCutConsoleTests(unittest.TestCase):
         self.console.execute("TEACH 2 25")
 
         self.assertFalse(self.console.armed)
-        self.assertIn(("teach", 2.0, 25.0, 150.0, 1.0), self.arm.calls)
+        self.assertIn(
+            ("teach", 2.0, 25.0, 150.0, 1.0, False), self.arm.calls
+        )
 
         self.console.execute("PLAY")
 
@@ -193,7 +204,9 @@ class SwivelCutConsoleTests(unittest.TestCase):
         self.console.execute("ARM FOLDED")
         self.console.execute("TEACH 3 40 250 0.4")
 
-        self.assertIn(("teach", 3.0, 40.0, 250.0, 0.4), self.arm.calls)
+        self.assertIn(
+            ("teach", 3.0, 40.0, 250.0, 0.4, False), self.arm.calls
+        )
 
     def test_clear_erases_taught_path(self):
         self.console.execute("CLEAR")
