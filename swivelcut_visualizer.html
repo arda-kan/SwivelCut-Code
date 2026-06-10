@@ -125,20 +125,38 @@
     </div>
 
     <div class="grp">
-      <h2>Target</h2>
-      <div class="seg cy" id="coordSeg" style="margin-bottom:10px">
-        <button data-c="xy" class="on">CARTESIAN&nbsp;X·Y</button>
-        <button data-c="polar">POLAR&nbsp;r·φ</button>
+      <h2>Serial motion command</h2>
+      <div class="field">
+        <label>Command</label>
+        <select id="command">
+          <option value="xy">XY - move both joints to a tip position</option>
+          <option value="xyj1">XYJ1 - solve XY, move only J1</option>
+          <option value="xyj2">XYJ2 - solve XY, move only J2</option>
+          <option value="angles">ANGLES - set both joint angles</option>
+          <option value="j1">J1 - set shoulder angle</option>
+          <option value="j2">J2 - set elbow angle</option>
+          <option value="cut">CUT - move to start, then cut a line</option>
+        </select>
       </div>
-      <div class="row" id="xyInputs">
-        <div class="field"><label>X sideways (mm)</label><input id="tx" type="number" value="0" step="5"></div>
+      <div class="row" id="xyInputs" style="margin-top:10px">
+        <div class="field"><label>X sideways / right (mm)</label><input id="tx" type="number" value="0" step="5"></div>
         <div class="field"><label>Y forward (mm)</label><input id="ty" type="number" value="300" step="5"></div>
       </div>
-      <div class="row" id="polarInputs" style="display:none">
-        <div class="field"><label>r (mm)</label><input id="tr" type="number" value="350" step="5"></div>
-        <div class="field"><label>φ (deg)</label><input id="tphi" type="number" value="31" step="1"></div>
+      <div class="row" id="angleInputs" style="display:none;margin-top:10px">
+        <div class="field" id="t1Field"><label>J1 shoulder (deg)</label><input id="tt1" type="number" value="0" step="1"></div>
+        <div class="field" id="t2Field"><label>J2 elbow (deg)</label><input id="tt2" type="number" value="90" step="1"></div>
       </div>
-      <div style="margin-top:10px">
+      <div id="cutInputs" style="display:none;margin-top:10px">
+        <div class="row">
+          <div class="field"><label>Start X0 (mm)</label><input id="x0" type="number" value="0" step="5"></div>
+          <div class="field"><label>Start Y0 (mm)</label><input id="y0" type="number" value="20" step="5"></div>
+        </div>
+        <div class="row" style="margin-top:9px">
+          <div class="field"><label>End X1 (mm)</label><input id="x1" type="number" value="0" step="5"></div>
+          <div class="field"><label>End Y1 (mm)</label><input id="y1" type="number" value="400" step="5"></div>
+        </div>
+      </div>
+      <div id="elbowControls" style="margin-top:10px">
         <label style="font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase">Elbow solution</label>
         <div class="seg cy" id="elbowSeg" style="margin-top:5px">
           <button data-e="up" class="on">UP</button>
@@ -148,19 +166,9 @@
     </div>
 
     <div class="grp">
-      <h2>Move</h2>
-      <label style="font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase">Joints driven</label>
-      <div class="seg" id="modeSeg" style="margin:5px 0 10px">
-        <button data-m="j1">J1 ONLY</button>
-        <button data-m="j2">J2 ONLY</button>
-        <button data-m="both" class="on">BOTH</button>
-      </div>
-      <label style="font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase">Path type (both)</label>
-      <div class="seg" id="pathSeg" style="margin-top:5px">
-        <button data-p="rapid" class="on">RAPID&nbsp;(joint)</button>
-        <button data-p="line">CUT&nbsp;(straight)</button>
-      </div>
-      <button class="go" id="go">▶ Execute move</button>
+      <h2>Simulation</h2>
+      <div class="field"><label>Equivalent serial input</label><input id="serialPreview" value="XY 0 300 UP" disabled></div>
+      <button class="go" id="go">Execute command</button>
       <button class="ghostbtn" id="home">⤺ Reset simulation to folded start</button>
     </div>
   </div>
@@ -187,7 +195,7 @@
     <span><i style="background:var(--link1)"></i>link 1 (θ1)</span>
     <span><i style="background:var(--link2)"></i>link 2 (θ2)</span>
     <span><i style="background:var(--target)"></i>target</span>
-    <span><i style="background:var(--ghost)"></i>commanded pose (ghost)</span>
+    <span><i style="background:var(--ghost)"></i>commanded end pose (ghost)</span>
     <span><i style="background:var(--cyan);opacity:.6"></i>tip trail</span>
   </div>
 </div>
@@ -200,9 +208,10 @@ const TAU = Math.PI*2, D2R = Math.PI/180, R2D = 180/Math.PI;
 const S = {
   L1:200, L2:200, g1:6, g2:9, spr:200, micro:32,
   j1Min:-90*D2R, j1Max:90*D2R, j2Min:-180*D2R, j2Max:180*D2R,
-  coord:"xy", elbow:"up", mode:"both", path:"rapid",
+  foldedRadius:1, lineSeg:2, coupling:0,
+  command:"xy", elbow:"up",
   cur:{t1:0, t2:Math.PI},       // required folded startup pose
-  cmd:{t1:0, t2:0, ok:false},  // commanded/target pose from inputs
+  cmd:{t1:0, t2:0, ok:false, error:""},
   trail:[], anim:null
 };
 
@@ -212,61 +221,112 @@ function forward(t1,t2){
   const sideways=S.L1*Math.sin(t1)+S.L2*Math.sin(t1+t2);
   return [sideways,forward];
 }
+function elbowPosition(t1){
+  return [S.L1*Math.sin(t1),S.L1*Math.cos(t1)];
+}
 function inverse(x,y,elbow){
   const r2=x*x+y*y;
   let c2=(r2 - S.L1*S.L1 - S.L2*S.L2)/(2*S.L1*S.L2);
   if(c2 < -1-1e-12 || c2 > 1+1e-12) return null;
   c2=Math.max(-1,Math.min(1,c2));
   let s2=Math.sqrt(1-c2*c2); if(elbow==="down") s2=-s2;
-  const t2=Math.atan2(s2,c2);
-  const t1=Math.atan2(x,y)-Math.atan2(S.L2*s2, S.L1+S.L2*c2);
+  const t2=normalizeAngle(Math.atan2(s2,c2));
+  const t1=normalizeAngle(
+    Math.atan2(x,y)-Math.atan2(S.L2*s2, S.L1+S.L2*c2)
+  );
   return [t1,t2];
 }
+function normalizeAngle(angle){
+  let normalized=((angle+Math.PI)%TAU+TAU)%TAU-Math.PI;
+  if(normalized===-Math.PI&&angle>0) normalized=Math.PI;
+  return normalized;
+}
+function validAngles(t1,t2){
+  return t1>=S.j1Min&&t1<=S.j1Max&&t2>=S.j2Min&&t2<=S.j2Max;
+}
+function reachable(x,y){
+  const r=Math.hypot(x,y);
+  return Math.abs(S.L1-S.L2)<=r&&r<=S.L1+S.L2;
+}
 const stepsPerRad = g => S.spr*S.micro*g/TAU;
-
-// Target input
-function targetXY(){
-  if(S.coord==="xy") return [ +$("tx").value, +$("ty").value ];
-  const r=+$("tr").value, p=(+$("tphi").value)*D2R;
-  return [ r*Math.sin(p), r*Math.cos(p) ];
+function pyRound(value){
+  const lower=Math.floor(value);
+  const fraction=value-lower;
+  if(fraction<0.5) return lower;
+  if(fraction>0.5) return lower+1;
+  return lower%2===0?lower:lower+1;
 }
+
+function numberValue(id){ return Number($(id).value); }
+function solveXY(x,y,elbow=S.elbow){
+  const solution=inverse(x,y,elbow);
+  return solution&&validAngles(solution[0],solution[1])?solution:null;
+}
+
+function commandTarget(){
+  const command=S.command;
+  let t1=S.cur.t1, t2=S.cur.t2, x=null, y=null, start=null;
+  let serial="";
+  if(command==="angles"||command==="j1"||command==="j2"){
+    if(command!=="j2") t1=numberValue("tt1")*D2R;
+    if(command!=="j1") t2=numberValue("tt2")*D2R;
+    serial=command==="angles"
+      ?`ANGLES ${numberValue("tt1")} ${numberValue("tt2")}`
+      :`${command.toUpperCase()} ${command==="j1"?numberValue("tt1"):numberValue("tt2")}`;
+    if(!validAngles(t1,t2)) return {ok:false,error:"joint angle outside software limits",serial};
+    [x,y]=forward(t1,t2);
+  }else if(command==="cut"){
+    start=[numberValue("x0"),numberValue("y0")];
+    x=numberValue("x1"); y=numberValue("y1");
+    serial=`CUT ${start[0]} ${start[1]} ${x} ${y} ${S.elbow.toUpperCase()}`;
+    const current=forward(S.cur.t1,S.cur.t2);
+    if(Math.hypot(current[0],current[1])<S.foldedRadius){
+      return {ok:false,error:"unfold with XY before CUT",serial};
+    }
+    if(!lineReachable(start[0],start[1],x,y)){
+      return {ok:false,error:"line crosses unreachable workspace",serial};
+    }
+    const segmentSolutions=cutSolutions(start[0],start[1],x,y,S.elbow);
+    if(!segmentSolutions) return {ok:false,error:"line exceeds joint limits",serial};
+    [t1,t2]=segmentSolutions[segmentSolutions.length-1];
+  }else{
+    x=numberValue("tx"); y=numberValue("ty");
+    serial=`${command.toUpperCase()} ${x} ${y} ${S.elbow.toUpperCase()}`;
+    const solution=solveXY(x,y);
+    if(!solution) return {ok:false,error:"target unreachable or outside joint limits",serial};
+    if(command!=="xyj2") t1=solution[0];
+    if(command!=="xyj1") t2=solution[1];
+  }
+  return {ok:true,error:"",t1,t2,x,y,start,serial};
+}
+
 function recompute(){
-  const [x,y]=targetXY();
-  const sol=inverse(x,y,S.elbow);
-  const withinLimits=sol&&sol[0]>=S.j1Min&&sol[0]<=S.j1Max
-    &&sol[1]>=S.j2Min&&sol[1]<=S.j2Max;
-  if(withinLimits){ S.cmd.t1=sol[0]; S.cmd.t2=sol[1]; S.cmd.ok=true; }
-  else { S.cmd.ok=false; }
-  S.cmd.x=x; S.cmd.y=y;
+  S.cmd=commandTarget();
+  $("serialPreview").value=S.cmd.serial||"";
   updateTelemetry(); draw();
-}
-
-// Joint-only modes hold the other joint.
-function achievedPose(){
-  if(!S.cmd.ok) return {t1:S.cur.t1, t2:S.cur.t2};
-  if(S.mode==="j1") return {t1:S.cmd.t1, t2:S.cur.t2};
-  if(S.mode==="j2") return {t1:S.cur.t1, t2:S.cmd.t2};
-  return {t1:S.cmd.t1, t2:S.cmd.t2};
 }
 
 // Readout
 function fmt(n,d=1){return (n>=0?"":"")+n.toFixed(d);}
 function updateTelemetry(){
-  const tgt=achievedPose();
+  const tgt=S.cmd.ok?S.cmd:S.cur;
   $("o_t1").innerHTML = fmt(tgt.t1*R2D)+'<span class="u">°</span>';
   $("o_t2").innerHTML = fmt(tgt.t2*R2D)+'<span class="u">°</span>';
   const [tx,ty]=forward(tgt.t1,tgt.t2);
   $("o_xy").textContent = `${tx.toFixed(0)}, ${ty.toFixed(0)}`;
-  const m1=tgt.t1/TAU*S.g1, m2=tgt.t2/TAU*S.g2;
+  const m1=tgt.t1/TAU*S.g1;
+  const m2=(tgt.t2+S.coupling*tgt.t1)/TAU*S.g2;
   $("o_m1").innerHTML = fmt(m1,2)+'<span class="u">rev</span>';
   $("o_m2").innerHTML = fmt(m2,2)+'<span class="u">rev</span>';
-  const ds1=Math.round(tgt.t1*stepsPerRad(S.g1))-Math.round(S.cur.t1*stepsPerRad(S.g1));
-  const ds2=Math.round(tgt.t2*stepsPerRad(S.g2))-Math.round(S.cur.t2*stepsPerRad(S.g2));
+  const ds1=pyRound(tgt.t1*stepsPerRad(S.g1))
+    -pyRound(S.cur.t1*stepsPerRad(S.g1));
+  const ds2=pyRound((tgt.t2+S.coupling*tgt.t1)*stepsPerRad(S.g2))
+    -pyRound((S.cur.t2+S.coupling*S.cur.t1)*stepsPerRad(S.g2));
   $("o_s1").textContent=ds1.toLocaleString();
   $("o_s2").textContent=ds2.toLocaleString();
   const r1=360/(S.spr*S.micro*S.g1), r2=360/(S.spr*S.micro*S.g2);
   $("o_res").textContent=`${r1.toFixed(4)}° / ${r2.toFixed(4)}°`;
-  $("err").textContent = "⚠ target out of range";
+  $("err").textContent = S.cmd.error||"target out of range";
   $("err").style.display = S.cmd.ok ? "none":"block";
   $("badge").textContent = `workspace · ${Math.abs(S.L1-S.L2).toFixed(0)}–${(S.L1+S.L2).toFixed(0)} mm`;
 }
@@ -319,6 +379,10 @@ function draw(){
   // axes
   ctx.strokeStyle=Cgrid2; ctx.beginPath();
   ctx.moveTo(0,sy(0));ctx.lineTo(W,sy(0));ctx.moveTo(sx(0),0);ctx.lineTo(sx(0),H);ctx.stroke();
+  ctx.fillStyle="rgba(211,230,230,.55)";
+  ctx.font='11px "JetBrains Mono", monospace';
+  ctx.fillText("+X right",W-66,sy(0)-8);
+  ctx.fillText("+Y forward",sx(0)+8,14);
 
   // trail
   if(S.trail.length>1){
@@ -334,11 +398,10 @@ function draw(){
   }
 
   // Commanded end pose
-  const tgt=achievedPose();
-  if(S.cmd.ok){ drawArm(tgt.t1,tgt.t2,"#5d7d80","#5d7d80",true); }
+  if(S.cmd.ok){ drawArm(S.cmd.t1,S.cmd.t2,"#5d7d80","#5d7d80",true); }
 
   // Target
-  if(S.cmd.ok){
+  if(S.cmd.ok&&S.cmd.x!==null){
     const X=sx(S.cmd.x), Y=sy(S.cmd.y);
     ctx.strokeStyle=cs.getPropertyValue('--target'); ctx.lineWidth=1.6;
     ctx.beginPath();ctx.moveTo(X-9,Y);ctx.lineTo(X+9,Y);
@@ -354,7 +417,7 @@ function draw(){
 }
 
 function drawArm(t1,t2,c1,c2,ghost){
-  const ex=S.L1*Math.cos(t1), ey=S.L1*Math.sin(t1);
+  const [ex,ey]=elbowPosition(t1);
   const [tx,ty]=forward(t1,t2);
   const bw=ghost?5:11;
   ctx.lineCap="round";
@@ -387,28 +450,35 @@ function easeTrap(t){
   const u=1-t;   return 1-(u*u)/(2*a*(1-a));
 }
 function lineReachable(x0,y0,x1,y1){
+  if(!reachable(x0,y0)||!reachable(x1,y1)) return false;
   const dx=x1-x0, dy=y1-y0;
   const len2=dx*dx+dy*dy;
   const u=len2===0?0:Math.max(0,Math.min(1,-(x0*dx+y0*dy)/len2));
   const nearest=Math.hypot(x0+u*dx,y0+u*dy);
   return nearest+1e-9>=Math.abs(S.L1-S.L2);
 }
+function cutSolutions(x0,y0,x1,y1,elbow){
+  const distance=Math.hypot(x1-x0,y1-y0);
+  const segments=Math.max(1,Math.ceil(distance/S.lineSeg));
+  const solutions=[];
+  for(let i=0;i<=segments;i++){
+    const fraction=i/segments;
+    const solution=solveXY(
+      x0+(x1-x0)*fraction,
+      y0+(y1-y0)*fraction,
+      elbow
+    );
+    if(!solution) return null;
+    solutions.push(solution);
+  }
+  return solutions;
+}
 function execute(){
   if(!S.cmd.ok || S.anim) return;
   const start={t1:S.cur.t1,t2:S.cur.t2};
-  const end=achievedPose();
-  const lineMode = (S.mode==="both" && S.path==="line");
-  const startTip=forward(start.t1,start.t2);
-  if(lineMode&&Math.hypot(startTip[0],startTip[1])<1){
-    $("err").textContent="⚠ use RAPID to unfold before a straight cut";
-    $("err").style.display="block";
-    return;
-  }
-  if(lineMode&&!lineReachable(startTip[0],startTip[1],S.cmd.x,S.cmd.y)){
-    $("err").textContent="⚠ straight path crosses unreachable zone";
-    $("err").style.display="block";
-    return;
-  }
+  const end={t1:S.cmd.t1,t2:S.cmd.t2};
+  const lineMode=S.command==="cut";
+  const cutStart=lineMode?solveXY(S.cmd.start[0],S.cmd.start[1]):null;
   const dJoint=Math.max(Math.abs(end.t1-start.t1),Math.abs(end.t2-start.t2));
   if(dJoint<1e-4 && !lineMode){ return; }
   const dur=Math.max(450, Math.min(2200, dJoint*R2D*9));  // ms, ~scaled to travel
@@ -419,10 +489,18 @@ function execute(){
     let p=(now-t0)/dur; if(p>1)p=1;
     const e=easeTrap(p);
     if(lineMode){
-      const x=startTip[0]+(S.cmd.x-startTip[0])*e;
-      const y=startTip[1]+(S.cmd.y-startTip[1])*e;
-      const sol=inverse(x,y,S.elbow);
-      if(sol){S.cur.t1=sol[0];S.cur.t2=sol[1];}
+      let x,y;
+      if(e<0.35){
+        const u=e/0.35;
+        S.cur.t1=start.t1+(cutStart[0]-start.t1)*u;
+        S.cur.t2=start.t2+(cutStart[1]-start.t2)*u;
+      }else{
+        const u=(e-0.35)/0.65;
+        x=S.cmd.start[0]+(S.cmd.x-S.cmd.start[0])*u;
+        y=S.cmd.start[1]+(S.cmd.y-S.cmd.start[1])*u;
+        const sol=inverse(x,y,S.elbow);
+        if(sol){S.cur.t1=sol[0];S.cur.t2=sol[1];}
+      }
     }else{
       S.cur.t1=start.t1+(end.t1-start.t1)*e;
       S.cur.t2=start.t2+(end.t2-start.t2)*e;
@@ -441,23 +519,28 @@ function execute(){
 }
 
 // Events
-["tx","ty","tr","tphi"].forEach(id=>{
+["tx","ty","tt1","tt2","x0","y0","x1","y1"].forEach(id=>{
   $(id).addEventListener("input",recompute);
 });
-function segWire(seg,key,fn){
+function segWire(seg,fn){
   $(seg).querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
     $(seg).querySelectorAll("button").forEach(x=>x.classList.remove("on"));
     b.classList.add("on"); fn(b); recompute();
   }));
 }
-segWire("coordSeg","coord",b=>{
-  S.coord=b.dataset.c;
-  $("xyInputs").style.display    = S.coord==="xy"?"flex":"none";
-  $("polarInputs").style.display = S.coord==="polar"?"flex":"none";
-});
-segWire("elbowSeg","elbow",b=>S.elbow=b.dataset.e);
-segWire("modeSeg","mode",b=>S.mode=b.dataset.m);
-segWire("pathSeg","path",b=>S.path=b.dataset.p);
+segWire("elbowSeg",b=>S.elbow=b.dataset.e);
+function updateCommandControls(){
+  S.command=$("command").value;
+  const angleCommand=["angles","j1","j2"].includes(S.command);
+  $("xyInputs").style.display=["xy","xyj1","xyj2"].includes(S.command)?"flex":"none";
+  $("angleInputs").style.display=angleCommand?"flex":"none";
+  $("cutInputs").style.display=S.command==="cut"?"block":"none";
+  $("elbowControls").style.display=angleCommand?"none":"block";
+  $("t1Field").style.display=S.command==="j2"?"none":"flex";
+  $("t2Field").style.display=S.command==="j1"?"none":"flex";
+  recompute();
+}
+$("command").addEventListener("change",updateCommandControls);
 $("go").addEventListener("click",execute);
 $("home").addEventListener("click",()=>{
   if(S.anim) return; S.cur={t1:0,t2:Math.PI}; S.trail=[]; recompute();
@@ -465,6 +548,6 @@ $("home").addEventListener("click",()=>{
 
 new ResizeObserver(()=>{resize();draw();}).observe(cv);
 window.addEventListener("load",()=>{ resize();
-  S.cur={t1:0,t2:Math.PI}; recompute();
+  S.cur={t1:0,t2:Math.PI}; updateCommandControls();
 });
 </script>

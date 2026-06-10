@@ -276,49 +276,148 @@ If a positive command turns a joint clockwise rather than counterclockwise,
 disconnect motor power and change that joint's `INVERT_J1` or `INVERT_J2`
 setting in `swivelcut.py`, upload the file again, and reset.
 
-### 8. Normal commands
+### 8. Serial command reference
+
+Commands are case-insensitive. Values are separated by spaces, angles are
+absolute degrees, and Cartesian positions are absolute millimetres from the
+shoulder pivot. Positive `X` points physically right, positive `Y` points
+forward, and positive joint rotation is counterclockwise when viewed from
+above.
+
+| Command | What it does | Important behavior |
+| --- | --- | --- |
+| `ARM FOLDED` | Calibrates both encoders at `J1=0`, `J2=180` and enables the drivers. | Physically fold the arm first. This command resets the controller's assumed pose. |
+| `DISARM` | Immediately disables both motor drivers. | To resume ordinary motion, physically fold the arm and use `ARM FOLDED` again. |
+| `ENC` | Reads magnet health and measured encoder angles. | Use this after moving a disabled arm by hand. It reports sensor measurements, unlike `POS`. |
+| `POS` | Prints the controller's current `X`, `Y`, `J1`, and `J2` state. | This is software state. It is not refreshed by arbitrary hand movement while disarmed. |
+| `J1 <deg>` | Moves J1 to an absolute shoulder angle while holding J2. | Allowed range is `-90` to `+90` degrees. |
+| `J2 <deg>` | Moves J2 to an absolute elbow angle while holding J1. | Allowed range is `-180` to `+180` degrees. |
+| `ANGLES <j1> <j2>` | Moves both joints together to absolute angles. | This is a joint-space move; the blade path is generally curved. |
+| `XY <x> <y> [UP\|DOWN]` | Solves inverse kinematics and moves both joints to the requested tip position. | Defaults to `UP`. This is point-to-point motion, not a straight cut. |
+| `XYJ1 <x> <y> [UP\|DOWN]` | Solves the requested XY pose but applies only its J1 angle. | J2 stays fixed, so the final blade position will normally not equal the entered XY point. |
+| `XYJ2 <x> <y> [UP\|DOWN]` | Solves the requested XY pose but applies only its J2 angle. | J1 stays fixed, so the final blade position will normally not equal the entered XY point. |
+| `CUT <x0> <y0> <x1> <y1> [UP\|DOWN]` | Moves to `(x0,y0)`, then follows a validated straight line to `(x1,y1)`. | The arm must already be unfolded. The controller checks the whole line before moving. |
+| `TEACH <seconds> [Hz]` | Disables the drivers and records encoder angles while the arm is guided by hand. | Duration must be greater than `0` and at most `60` seconds; sample rate is `1-50` Hz and defaults to `20` Hz. |
+| `PLAY` | Enables the drivers, returns to the taught start, and replays the recording. | Keep clear: the return-to-start move happens automatically. |
+| `CLEAR` | Deletes the taught path from RAM. | Recordings are also lost on reset or power loss. |
+| `HELP` | Prints the command list in the serial terminal. | Useful for checking the exact accepted syntax. |
+
+#### Joint-space moves
+
+Use `J1`, `J2`, or `ANGLES` when the joint angles themselves matter or when
+unfolding from the singular startup pose:
 
 ```text
-ANGLES 30 120
-J1 -20
-J2 90
-XY 200 100
-XY 200 100 DOWN
-XYJ1 200 100
-XYJ2 200 100 DOWN
-CUT 100 100 250 100
-ENC
-TEACH 5
-PLAY
-CLEAR
-POS
-DISARM
-HELP
+J2 175
+J1 5
+ANGLES 20 120
 ```
 
-Angles are absolute degrees, not relative movements. `ANGLES 30 120` means
-"move J1 to +30 degrees and J2 to +120 degrees." `XY` values are absolute
-millimetres from the shoulder pivot. `XYJ1` and `XYJ2` calculate the normal XY
-solution but move only the named joint. Because the other joint stays still,
-the blade will usually not finish at the requested XY point. Before `CUT`, move
-to a safely unfolded starting position. A cut cannot begin at exact `(0, 0)`
-because the fully folded arm is a singularity. For a forward centerline cut,
-start slightly away from the origin:
+These commands do not promise a straight blade path. `ANGLES 30 120` means
+"move J1 to +30 degrees and J2 to +120 degrees", not move each joint by that
+amount.
+
+#### Point-to-point XY moves
+
+`XY` chooses joint angles that place the blade at the requested coordinate:
+
+```text
+XY 0 400 UP
+XY 200 100 DOWN
+```
+
+`UP` and `DOWN` select the two inverse-kinematics branches. They can reach the
+same XY point with different joint poses. A branch is rejected if either
+resulting angle violates its software limit. With both links straight,
+`XY 0 400` corresponds to `J1=0`, `J2=0`.
+
+`XYJ1` and `XYJ2` are diagnostic or setup tools, not partial Cartesian moves.
+For example, `XYJ1 200 100 UP` calculates the complete solution for
+`(200,100)` but moves only the shoulder to that solution's J1 angle. The elbow
+remains where it was.
+
+#### Straight cuts
+
+`CUT` has an explicit start and end:
 
 ```text
 XY 0 20 UP
 CUT 0 20 0 400 UP
 ```
 
-For example, this moves both links into the straight-ahead pose:
+The first command unfolds the arm. The `CUT` command then:
+
+1. Rejects the operation if the arm is still folded at `(0,0)`.
+2. Checks that both endpoints and the entire line are in the reachable annulus.
+3. Solves every 2 mm point along the line and checks joint limits before motion.
+4. Moves point-to-point to `(x0,y0)`, even if the blade is currently elsewhere.
+5. Follows the straight segment from `(x0,y0)` to `(x1,y1)`.
+
+Therefore, use the blade's intended entry point as `(x0,y0)`. Do not assume a
+command such as `CUT 100 100 250 100` cuts from the current position to
+`(250,100)`; it first moves to `(100,100)`.
+
+#### State and safety commands
+
+`ENC` and `POS` answer different questions:
 
 ```text
-XY 0 400
+ENC
+POS
 ```
+
+- `ENC` samples the physical motor-shaft encoders.
+- `POS` prints the controller's tracked pose.
+- After a normal powered move or completed `TEACH`, they should closely agree.
+- After hand-moving a disarmed arm, `ENC` changes but `POS` may remain stale
+  until the controller explicitly synchronizes from the encoders.
+
+`DISARM` removes holding torque. The arm may move under hand force or gravity,
+so do not rely on the previous software pose after disarming. Use the required
+folded calibration procedure before returning to ordinary powered commands.
+
+Typical safe powered session:
+
+```text
+ARM FOLDED
+ENC
+J2 175
+J1 5
+XY 0 20 UP
+CUT 0 20 0 300 UP
+POS
+DISARM
+```
+
+If a command is malformed, unreachable, outside a joint limit, or unsafe from
+the folded singularity, the console prints `ERROR:` and does not execute that
+command. An encoder feedback failure prints `FEEDBACK FAULT:`, disables the
+drivers, and requires the encoder issue to be corrected before folding and
+arming again.
 
 Pressing `Ctrl-C` while connected stops the Python program and disables the
 drivers through the console cleanup handler. Cutting motor power with the
 physical emergency switch remains the primary emergency stop.
+
+## Browser visualizer
+
+Open `swivelcut_visualizer.html` in a browser to preview the motion commands
+without hardware. The command selector mirrors `J1`, `J2`, `ANGLES`, `XY`,
+`XYJ1`, `XYJ2`, and `CUT`, and shows the equivalent serial command.
+
+The visualizer uses the same conventions and checks as `swivelcut.py`:
+
+- `X` is sideways/right and `Y` is forward.
+- `J1=0`, `J2=0` points both links forward to `(0,400)`.
+- The folded start is `J1=0`, `J2=180` at `(0,0)`.
+- Elbow `UP`/`DOWN`, angle normalization, software limits, reachability,
+  coupling-aware motor steps, and 2 mm `CUT` validation match the controller.
+- `CUT` first moves to its explicit start point and then traces the line.
+
+The visualizer predicts commanded geometry and step counts. It does not model
+encoder noise, missed steps, acceleration timing, backlash, belt flex, or
+post-move feedback correction, so it is a planning aid rather than a hardware
+safety check.
 
 ## Teach and replay
 
