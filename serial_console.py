@@ -6,6 +6,7 @@ from swivelcut import SwivelCut
 
 HELP = """Commands:
   ARM FOLDED          confirm the physical folded pose and enable the drivers
+  ARM J1              test only J1 with its encoder; all J2 motion is blocked
   DISARM              disable both motor drivers
   ENC                 print encoder magnet health and measured joint angles
   J1 <deg>            move shoulder to an absolute angle
@@ -36,10 +37,15 @@ class SwivelCutConsole:
         self.arm = arm if arm is not None else SwivelCut()
         self.output = output
         self.armed = False
+        self.arm_mode = None
 
-    def _require_armed(self):
+    def _require_armed(self, joint=None):
         if not self.armed:
             raise ValueError("arm is disabled; place it folded and type ARM FOLDED")
+        if self.arm_mode == "j1" and joint != 1:
+            raise ValueError(
+                "ARM J1 test mode permits only J1 <deg>; use DISARM to stop"
+            )
 
     @staticmethod
     def _elbow(value):
@@ -57,19 +63,30 @@ class SwivelCutConsole:
         if command == "HELP":
             self.output(HELP)
         elif command == "ARM":
-            if len(parts) != 2 or parts[1].upper() != "FOLDED":
-                raise ValueError("use ARM FOLDED after physically folding the arm")
+            if len(parts) != 2 or parts[1].upper() not in ("FOLDED", "J1"):
+                raise ValueError("use ARM FOLDED or ARM J1 after folding the arm")
             self.arm.disable()
             self.arm.set_folded_start()
-            self.arm.calibrate_encoders()
+            if parts[1].upper() == "J1":
+                self.arm.calibrate_j1_encoder()
+                message = (
+                    "ARMED J1 TEST: J1 encoder calibrated at 0.0; "
+                    "only J1 motion is allowed"
+                )
+                self.arm_mode = "j1"
+            else:
+                self.arm.calibrate_encoders()
+                message = (
+                    "ARMED: encoders calibrated at folded J1=0.0, J2=180.0"
+                )
+                self.arm_mode = "dual"
             self.arm.enable()
             self.armed = True
-            self.output(
-                "ARMED: encoders calibrated at folded J1=0.0, J2=180.0"
-            )
+            self.output(message)
         elif command == "DISARM":
             self.arm.disable()
             self.armed = False
+            self.arm_mode = None
             self.output("DISARMED")
         elif command == "ENC":
             self._expect_count(parts, 1, "ENC")
@@ -83,12 +100,12 @@ class SwivelCutConsole:
                 "ENC J1={} J2={}{}".format(j1_state, j2_state, angles)
             )
         elif command == "J1":
-            self._require_armed()
+            self._require_armed(joint=1)
             self._expect_count(parts, 2, "J1 <deg>")
             self.arm.move_joint(1, float(parts[1]))
             self._print_position()
         elif command == "J2":
-            self._require_armed()
+            self._require_armed(joint=2)
             self._expect_count(parts, 2, "J2 <deg>")
             self.arm.move_joint(2, float(parts[1]))
             self._print_position()
@@ -132,12 +149,14 @@ class SwivelCutConsole:
                 )
             )
             self.armed = False
+            self.arm_mode = None
             count = self.arm.record_teach(duration, sample_hz)
             self.output("TAUGHT: {} points recorded; type PLAY".format(count))
         elif command == "PLAY":
             self._expect_count(parts, 1, "PLAY")
             count = self.arm.replay_teach()
             self.armed = True
+            self.arm_mode = "dual"
             self.output("PLAYED: {} points".format(count))
             self._print_position()
         elif command == "CLEAR":
@@ -169,6 +188,7 @@ class SwivelCutConsole:
     def shutdown(self):
         self.arm.disable()
         self.armed = False
+        self.arm_mode = None
 
 
 def run_console():

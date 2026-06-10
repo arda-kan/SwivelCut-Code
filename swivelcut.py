@@ -101,6 +101,7 @@ class SwivelCut:
         else:
             self.encoders = None
         self.encoder_calibrated = False
+        self.encoder_mode = None
         self.feedback_fault = None
         self.teach_points = []
         self.set_folded_start()
@@ -212,6 +213,7 @@ class SwivelCut:
         """Define the current encoder readings as the known folded pose."""
         self._require_encoders()
         self.encoder_calibrated = False
+        self.encoder_mode = None
         motor1 = self.t1 * GEAR_J1
         motor2 = (self.t2 + self.coupling * self.t1) * GEAR_J2
         try:
@@ -220,12 +222,30 @@ class SwivelCut:
         except (OSError, EncoderError) as error:
             self._feedback_fail(str(error))
         self.encoder_calibrated = True
+        self.encoder_mode = "dual"
+        self.feedback_fault = None
+        return self.encoder_angles()
+
+    def calibrate_j1_encoder(self):
+        """Calibrate only J1 for guarded single-motor bench testing."""
+        self._require_encoders()
+        self.encoder_calibrated = False
+        self.encoder_mode = None
+        motor1 = self.t1 * GEAR_J1
+        try:
+            self.encoders[0].calibrate(motor1)
+        except (OSError, EncoderError) as error:
+            self._feedback_fail(str(error))
+        self.encoder_calibrated = True
+        self.encoder_mode = "j1"
         self.feedback_fault = None
         return self.encoder_angles()
 
     def encoder_status(self):
         self._require_encoders()
         try:
+            if self.encoder_mode == "j1":
+                return self.encoders[0].magnet_state(), "not installed"
             return (
                 self.encoders[0].magnet_state(),
                 self.encoders[1].magnet_state(),
@@ -238,11 +258,15 @@ class SwivelCut:
             return None
         try:
             motor1 = self.encoders[0].update()
-            motor2 = self.encoders[1].update()
+            if self.encoder_mode != "j1":
+                motor2 = self.encoders[1].update()
         except (OSError, EncoderError) as error:
             self._feedback_fail(str(error))
         t1 = motor1 / GEAR_J1
-        t2 = motor2 / GEAR_J2 - self.coupling * t1
+        if self.encoder_mode != "j1":
+            t2 = motor2 / GEAR_J2 - self.coupling * t1
+        else:
+            t2 = self.t2
         return t1, t2
 
     def encoder_angles(self):
@@ -264,6 +288,7 @@ class SwivelCut:
     def _feedback_fail(self, message):
         self.feedback_fault = message
         self.encoder_calibrated = False
+        self.encoder_mode = None
         self.disable()
         raise EncoderError(message)
 
@@ -280,7 +305,10 @@ class SwivelCut:
             measured_t1, measured_t2 = self._sample_encoders()
             error1 = target_t1 - measured_t1
             error2 = target_t2 - measured_t2
-            worst_error = max(abs(error1), abs(error2))
+            if self.encoder_mode == "j1":
+                worst_error = abs(error1)
+            else:
+                worst_error = max(abs(error1), abs(error2))
             if worst_error <= tolerance:
                 self.t1, self.t2 = measured_t1, measured_t2
                 self.j1.pos, self.j2.pos = self._angle_to_steps(self.t1, self.t2)
@@ -333,6 +361,12 @@ class SwivelCut:
         """Coordinated move of BOTH joints to absolute angles (deg)."""
         if self.encoders and not self.encoder_calibrated:
             self._feedback_fail("encoders are not calibrated")
+        if self.encoder_mode == "j1":
+            current_t2_deg = math.degrees(self.t2)
+            if abs(t2_deg - current_t2_deg) > 1e-9:
+                raise EncoderError(
+                    "J1 test mode blocks J2 motion; use only J1 <deg>"
+                )
         t1, t2 = self._move_to_angles_once(
             t1_deg, t2_deg, ramp_in=ramp_in, ramp_out=ramp_out
         )
@@ -404,6 +438,8 @@ class SwivelCut:
         """Record a hand-guided joint trajectory while the drivers are off."""
         if not self.encoder_calibrated:
             raise EncoderError("encoders are not calibrated")
+        if self.encoder_mode == "j1":
+            raise EncoderError("TEACH requires both encoders")
         if duration_s <= 0 or duration_s > TEACH_MAX_SECONDS:
             raise ValueError(
                 "teach duration must be in (0, {}] seconds".format(
@@ -445,6 +481,8 @@ class SwivelCut:
             raise ValueError("no taught movement; use TEACH first")
         if not self.encoder_calibrated:
             raise EncoderError("encoders are not calibrated")
+        if self.encoder_mode == "j1":
+            raise EncoderError("PLAY requires both encoders")
 
         for _elapsed, t1_deg, t2_deg in self.teach_points:
             self._validate_angles(t1_deg, t2_deg)

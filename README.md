@@ -21,6 +21,11 @@ J2 = 180 degrees.
 The folded pose is a kinematic singularity at `(0, 0)`. Use a joint-space or
 point-to-point move to unfold the arm before calling `cut_line()`.
 
+For temporary bench testing with only the J1 encoder installed, fold the arm
+and use `ARM J1`. This mode calibrates and monitors only J1 and accepts only
+`J1 <deg>` motor commands. J2, Cartesian, cutting, teach, and replay commands
+remain blocked. Normal `ARM FOLDED` operation still requires both encoders.
+
 ## Current capabilities
 
 - Coordinated absolute shoulder and elbow moves with acceleration ramps
@@ -287,6 +292,7 @@ above.
 | Command | What it does | Important behavior |
 | --- | --- | --- |
 | `ARM FOLDED` | Calibrates both encoders at `J1=0`, `J2=180` and enables the drivers. | Physically fold the arm first. This command resets the controller's assumed pose. |
+| `ARM J1` | Calibrates only the J1 encoder at `J1=0` for single-motor bench testing. | Physically fold the arm first. Only `J1 <deg>`, `ENC`, `POS`, and `DISARM` are available until disarmed. |
 | `DISARM` | Immediately disables both motor drivers. | To resume ordinary motion, physically fold the arm and use `ARM FOLDED` again. |
 | `ENC` | Reads magnet health and measured encoder angles. | Use this after moving a disabled arm by hand. It reports sensor measurements, unlike `POS`. |
 | `POS` | Prints the controller's current `X`, `Y`, `J1`, and `J2` state. | This is software state. It is not refreshed by arbitrary hand movement while disarmed. |
