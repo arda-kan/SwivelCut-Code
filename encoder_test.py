@@ -10,7 +10,7 @@ REG_RAW_ANGLE = 0x0C
 
 ENCODERS = (
     ("J1", 16, 17),  # name, SDA, SCL
-    ("J2", 14, 13),
+    ("J2", 21, 22),
 )
 
 
