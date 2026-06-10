@@ -23,7 +23,7 @@ point-to-point move to unfold the arm before calling `cut_line()`.
 
 For temporary bench testing with only the J1 encoder installed, fold the arm
 and use `ARM J1`. This mode calibrates and monitors only J1. It accepts direct
-`J1 <deg>` moves and J1-only `TEACH`/`PLAY`, while holding J2 fixed. J2,
+`J1 <deg>` moves and explicit `TEACH J1`/`PLAY`, while holding J2 fixed. J2,
 Cartesian, and cutting commands remain blocked. Normal `ARM FOLDED` operation
 still requires both encoders.
 
@@ -293,7 +293,7 @@ above.
 | Command | What it does | Important behavior |
 | --- | --- | --- |
 | `ARM FOLDED` | Calibrates both encoders at `J1=0`, `J2=180` and enables the drivers. | Physically fold the arm first. This command resets the controller's assumed pose. |
-| `ARM J1` | Calibrates only the J1 encoder at `J1=0` for single-motor testing and teaching. | Physically fold the arm first. `J1`, `TEACH`, and `PLAY` operate only J1; all J2 motion remains blocked. |
+| `ARM J1` | Calibrates only the J1 encoder at `J1=0` for single-motor testing and teaching. | Physically fold the arm first. Use `TEACH J1`, not ordinary `TEACH`. |
 | `DISARM` | Immediately disables both motor drivers. | To resume ordinary motion, physically fold the arm and use `ARM FOLDED` again. |
 | `ENC` | Reads magnet health and measured encoder angles. | Use this after moving a disabled arm by hand. It reports sensor measurements, unlike `POS`. |
 | `POS` | Prints the controller's current `X`, `Y`, `J1`, and `J2` state. | This is software state. It is not refreshed by arbitrary hand movement while disarmed. |
@@ -304,7 +304,8 @@ above.
 | `XYJ1 <x> <y> [UP\|DOWN]` | Solves the requested XY pose but applies only its J1 angle. | J2 stays fixed, so the final blade position will normally not equal the entered XY point. |
 | `XYJ2 <x> <y> [UP\|DOWN]` | Solves the requested XY pose but applies only its J2 angle. | J1 stays fixed, so the final blade position will normally not equal the entered XY point. |
 | `CUT <x0> <y0> <x1> <y1> [UP\|DOWN]` | Moves to `(x0,y0)`, then follows a validated straight line to `(x1,y1)`. | The arm must already be unfolded. The controller checks the whole line before moving. |
-| `TEACH <seconds> [Hz]` | Disables the drivers and records encoder angles while the arm is guided by hand. | In `ARM J1` mode, only J1 is recorded and J2 remains fixed during replay. |
+| `TEACH <seconds> [Hz]` | Disables the drivers and records both joint encoders while the arm is guided by hand. | This original mode still requires both encoders. |
+| `TEACH J1 <seconds> [Hz]` | Records only J1 after `ARM J1`. | J2 remains fixed during replay. |
 | `PLAY` | Enables the drivers, returns to the taught start, and replays the recording. | Keep clear: the return-to-start move happens automatically. |
 | `CLEAR` | Deletes the taught path from RAM. | Recordings are also lost on reset or power loss. |
 | `HELP` | Prints the command list in the serial terminal. | Useful for checking the exact accepted syntax. |

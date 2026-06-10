@@ -21,7 +21,9 @@ HELP = """Commands:
   CUT <x0> <y0> <x1> <y1> [UP|DOWN]
                       cut a straight Cartesian line
   TEACH <seconds> [Hz]
-                      disable motors and record a hand-guided movement
+                      record both joints using both encoders
+  TEACH J1 <seconds> [Hz]
+                      record only J1 while J2 remains fixed
   PLAY                return to the taught start and replay the movement
   CLEAR               erase the taught movement
   POS                 print x, y, J1 and J2
@@ -48,7 +50,7 @@ class SwivelCutConsole:
             and not allow_j1_teach
         ):
             raise ValueError(
-                "ARM J1 mode permits only J1 <deg> and TEACH; "
+                "ARM J1 mode permits only J1 <deg> and TEACH J1; "
                 "use DISARM to stop"
             )
 
@@ -143,18 +145,25 @@ class SwivelCutConsole:
             self.arm.cut_line(*coordinates, elbow=elbow)
             self._print_position()
         elif command == "TEACH":
-            self._require_armed(allow_j1_teach=True)
-            if len(parts) not in (2, 3):
-                raise ValueError("use TEACH <seconds> [Hz]")
-            duration = float(parts[1])
-            sample_hz = float(parts[2]) if len(parts) == 3 else 20
+            j1_only = len(parts) >= 2 and parts[1].upper() == "J1"
+            self._require_armed(allow_j1_teach=j1_only)
+            values = parts[2:] if j1_only else parts[1:]
+            if len(values) not in (1, 2):
+                raise ValueError(
+                    "use TEACH <seconds> [Hz] or TEACH J1 <seconds> [Hz]"
+                )
+            duration = float(values[0])
+            sample_hz = float(values[1]) if len(values) == 2 else 20
+            label = " J1" if j1_only else ""
             self.output(
-                "TEACHING: motors disabled; guide the arm for {:.1f} s".format(
-                    duration
+                "TEACHING{}: motors disabled; guide the arm for {:.1f} s".format(
+                    label, duration
                 )
             )
             self.armed = False
-            count = self.arm.record_teach(duration, sample_hz)
+            count = self.arm.record_teach(
+                duration, sample_hz, j1_only=j1_only
+            )
             self.output("TAUGHT: {} points recorded; type PLAY".format(count))
         elif command == "PLAY":
             self._expect_count(parts, 1, "PLAY")

@@ -57,8 +57,8 @@ class FakeArm:
     def cut_line(self, x0, y0, x1, y1, elbow):
         self.calls.append(("cut", x0, y0, x1, y1, elbow))
 
-    def record_teach(self, duration, sample_hz):
-        self.calls.append(("teach", duration, sample_hz))
+    def record_teach(self, duration, sample_hz, j1_only=False):
+        self.calls.append(("teach", duration, sample_hz, j1_only))
         self.enabled = False
         self.taught = [(0, 0, 180), (1000, 10, 160)]
         return len(self.taught)
@@ -116,11 +116,13 @@ class SwivelCutConsoleTests(unittest.TestCase):
 
     def test_arm_j1_can_teach_and_replay(self):
         self.console.execute("ARM J1")
-        self.console.execute("TEACH 2 25")
+        with self.assertRaisesRegex(ValueError, "TEACH J1"):
+            self.console.execute("TEACH 2 25")
+        self.console.execute("TEACH J1 2 25")
 
         self.assertFalse(self.console.armed)
         self.assertEqual(self.console.arm_mode, "j1")
-        self.assertIn(("teach", 2.0, 25.0), self.arm.calls)
+        self.assertIn(("teach", 2.0, 25.0, True), self.arm.calls)
 
         self.console.execute("PLAY")
 
@@ -171,7 +173,7 @@ class SwivelCutConsoleTests(unittest.TestCase):
         self.console.execute("TEACH 2 25")
 
         self.assertFalse(self.console.armed)
-        self.assertIn(("teach", 2.0, 25.0), self.arm.calls)
+        self.assertIn(("teach", 2.0, 25.0, False), self.arm.calls)
 
         self.console.execute("PLAY")
 
