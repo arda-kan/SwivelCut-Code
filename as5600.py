@@ -72,7 +72,7 @@ class MultiTurnEncoder:
         self.unwrapped_counts = 0
         self.origin_motor_rad = 0.0
 
-    def calibrate(self, known_motor_rad):
+    def calibrate(self, known_motor_rad, require_stable=True):
         self.sensor.require_magnet(self.name)
         raw_samples = []
         unwrapped_samples = []
@@ -92,7 +92,10 @@ class MultiTurnEncoder:
                 sleep_ms(2)
 
         stable = unwrapped_samples[CALIBRATION_SETTLE_SAMPLES:]
-        if max(stable) - min(stable) > CALIBRATION_MAX_SPREAD_COUNTS:
+        if (
+            require_stable
+            and max(stable) - min(stable) > CALIBRATION_MAX_SPREAD_COUNTS
+        ):
             raise EncoderError(
                 "{} reading is unstable; check magnet alignment and wiring".format(
                     self.name
