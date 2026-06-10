@@ -1,6 +1,13 @@
 """AS5600 magnetic encoder support for MicroPython."""
 
 import math
+try:
+    from time import sleep_ms
+except ImportError:
+    from time import sleep
+
+    def sleep_ms(milliseconds):
+        sleep(milliseconds / 1000.0)
 
 
 AS5600_ADDRESS = 0x36
@@ -14,6 +21,9 @@ STATUS_MAGNET_TOO_STRONG = 0x08
 COUNTS_PER_REV = 4096
 HALF_COUNTS = COUNTS_PER_REV // 2
 TWO_PI = 2.0 * math.pi
+CALIBRATION_SAMPLES = 7
+CALIBRATION_SETTLE_SAMPLES = 2
+CALIBRATION_MAX_SPREAD_COUNTS = 16
 
 
 class EncoderError(RuntimeError):
@@ -64,7 +74,32 @@ class MultiTurnEncoder:
 
     def calibrate(self, known_motor_rad):
         self.sensor.require_magnet(self.name)
-        self.last_raw = self.sensor.read_raw()
+        raw_samples = []
+        unwrapped_samples = []
+        for index in range(CALIBRATION_SAMPLES):
+            raw = self.sensor.read_raw()
+            raw_samples.append(raw)
+            if unwrapped_samples:
+                delta = raw - raw_samples[-2]
+                if delta > HALF_COUNTS:
+                    delta -= COUNTS_PER_REV
+                elif delta < -HALF_COUNTS:
+                    delta += COUNTS_PER_REV
+                unwrapped_samples.append(unwrapped_samples[-1] + delta)
+            else:
+                unwrapped_samples.append(raw)
+            if index + 1 < CALIBRATION_SAMPLES:
+                sleep_ms(2)
+
+        stable = unwrapped_samples[CALIBRATION_SETTLE_SAMPLES:]
+        if max(stable) - min(stable) > CALIBRATION_MAX_SPREAD_COUNTS:
+            raise EncoderError(
+                "{} reading is unstable; check magnet alignment and wiring".format(
+                    self.name
+                )
+            )
+
+        self.last_raw = raw_samples[-1]
         self.unwrapped_counts = 0
         self.origin_motor_rad = known_motor_rad
         self.calibrated = True
