@@ -25,7 +25,9 @@ class FakeI2C:
         if register == REG_STATUS:
             return bytes((self.status,))
         if register == REG_RAW_ANGLE and count == 2:
-            angle = self.angles.pop(0)
+            angle = self.angles[0]
+            if len(self.angles) > 1:
+                self.angles.pop(0)
             return bytes(((angle >> 8) & 0x0F, angle & 0xFF))
         raise AssertionError("unexpected register read")
 
@@ -44,7 +46,7 @@ class AS5600Tests(unittest.TestCase):
                 sensor.require_magnet("test")
 
     def test_multiturn_encoder_unwraps_forward_boundary(self):
-        sensor = AS5600(FakeI2C([4090, 5]))
+        sensor = AS5600(FakeI2C([4090] * 7 + [5]))
         encoder = MultiTurnEncoder(sensor)
 
         encoder.calibrate(0.0)
@@ -53,7 +55,7 @@ class AS5600Tests(unittest.TestCase):
         self.assertAlmostEqual(measured, 11 * 2 * math.pi / 4096)
 
     def test_multiturn_encoder_unwraps_reverse_boundary(self):
-        sensor = AS5600(FakeI2C([5, 4090]))
+        sensor = AS5600(FakeI2C([5] * 7 + [4090]))
         encoder = MultiTurnEncoder(sensor)
 
         encoder.calibrate(0.0)
@@ -62,12 +64,27 @@ class AS5600Tests(unittest.TestCase):
         self.assertAlmostEqual(measured, -11 * 2 * math.pi / 4096)
 
     def test_encoder_sign_changes_logical_direction(self):
-        sensor = AS5600(FakeI2C([100, 110]))
+        sensor = AS5600(FakeI2C([100] * 7 + [110]))
         encoder = MultiTurnEncoder(sensor, motor_sign=-1)
 
         encoder.calibrate(1.0)
 
         self.assertLess(encoder.update(), 1.0)
+
+    def test_calibration_rejects_unstable_angle_samples(self):
+        sensor = AS5600(FakeI2C([100, 100, 100, 500, 100, 500, 100]))
+        encoder = MultiTurnEncoder(sensor, name="J1 encoder")
+
+        with self.assertRaisesRegex(EncoderError, "reading is unstable"):
+            encoder.calibrate(0.0)
+
+    def test_calibration_ignores_initial_stale_samples(self):
+        sensor = AS5600(FakeI2C([900, 400, 100, 101, 100, 101, 100, 100]))
+        encoder = MultiTurnEncoder(sensor)
+
+        encoder.calibrate(0.0)
+
+        self.assertAlmostEqual(encoder.update(), 0.0)
 
 
 if __name__ == "__main__":
