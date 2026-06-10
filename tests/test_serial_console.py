@@ -114,6 +114,20 @@ class SwivelCutConsoleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only J1"):
             self.console.execute("XYJ1 100 100")
 
+    def test_arm_j1_can_teach_and_replay(self):
+        self.console.execute("ARM J1")
+        self.console.execute("TEACH 2 25")
+
+        self.assertFalse(self.console.armed)
+        self.assertEqual(self.console.arm_mode, "j1")
+        self.assertIn(("teach", 2.0, 25.0), self.arm.calls)
+
+        self.console.execute("PLAY")
+
+        self.assertTrue(self.console.armed)
+        self.assertEqual(self.console.arm_mode, "j1")
+        self.assertIn(("play",), self.arm.calls)
+
     def test_degree_and_cartesian_commands(self):
         self.console.execute("ARM FOLDED")
         self.console.execute("J1 30")

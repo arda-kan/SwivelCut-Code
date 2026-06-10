@@ -253,6 +253,43 @@ class SwivelCutTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "blocks J2 motion"):
             arm.move_joint(2, 170)
 
+    def test_j1_only_replay_keeps_j2_fixed(self):
+        class FakeEncoder:
+            def update(self):
+                return 0.0
+
+        arm = swivelcut.SwivelCut(encoders=(FakeEncoder(), FakeEncoder()))
+        arm.encoder_calibrated = True
+        arm.encoder_mode = "j1"
+        arm.teach_points = [(0, 0.0, 180.0), (0, 1.0, 180.0)]
+        arm._settle_feedback = lambda _t1, _t2: None
+        executed = []
+
+        def execute(d1, d2, _ramp_in=True, _ramp_out=True):
+            executed.append((d1, d2))
+            arm.j1.pos += d1
+            arm.j2.pos += d2
+
+        arm._execute = execute
+        initial_j2_steps = arm.j2.pos
+
+        arm.replay_teach()
+
+        self.assertTrue(executed)
+        self.assertTrue(all(d2 == 0 for _d1, d2 in executed))
+        self.assertEqual(arm.j2.pos, initial_j2_steps)
+        self.assertAlmostEqual(math.degrees(arm.t2), 180.0)
+
+    def test_j1_only_replay_rejects_j2_changes(self):
+        arm = swivelcut.SwivelCut(auto_encoders=False)
+        arm.encoders = (object(), object())
+        arm.encoder_calibrated = True
+        arm.encoder_mode = "j1"
+        arm.teach_points = [(0, 0.0, 180.0), (100, 1.0, 170.0)]
+
+        with self.assertRaisesRegex(Exception, "cannot move J2"):
+            arm.replay_teach()
+
     def test_large_encoder_error_disables_drivers(self):
         class FakeEncoder:
             def __init__(self, value):

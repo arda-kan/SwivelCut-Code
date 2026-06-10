@@ -39,12 +39,17 @@ class SwivelCutConsole:
         self.armed = False
         self.arm_mode = None
 
-    def _require_armed(self, joint=None):
+    def _require_armed(self, joint=None, allow_j1_teach=False):
         if not self.armed:
             raise ValueError("arm is disabled; place it folded and type ARM FOLDED")
-        if self.arm_mode == "j1" and joint != 1:
+        if (
+            self.arm_mode == "j1"
+            and joint != 1
+            and not allow_j1_teach
+        ):
             raise ValueError(
-                "ARM J1 test mode permits only J1 <deg>; use DISARM to stop"
+                "ARM J1 mode permits only J1 <deg> and TEACH; "
+                "use DISARM to stop"
             )
 
     @staticmethod
@@ -138,7 +143,7 @@ class SwivelCutConsole:
             self.arm.cut_line(*coordinates, elbow=elbow)
             self._print_position()
         elif command == "TEACH":
-            self._require_armed()
+            self._require_armed(allow_j1_teach=True)
             if len(parts) not in (2, 3):
                 raise ValueError("use TEACH <seconds> [Hz]")
             duration = float(parts[1])
@@ -149,14 +154,12 @@ class SwivelCutConsole:
                 )
             )
             self.armed = False
-            self.arm_mode = None
             count = self.arm.record_teach(duration, sample_hz)
             self.output("TAUGHT: {} points recorded; type PLAY".format(count))
         elif command == "PLAY":
             self._expect_count(parts, 1, "PLAY")
             count = self.arm.replay_teach()
             self.armed = True
-            self.arm_mode = "dual"
             self.output("PLAYED: {} points".format(count))
             self._print_position()
         elif command == "CLEAR":
