@@ -2,6 +2,19 @@
 
 Controller and motion visualizer for the two-joint SwivelCut cardboard cutter.
 
+## Arduino IDE firmware
+
+The primary ESP32 firmware is now
+`SwivelCutArduino/SwivelCutArduino.ino`. Open that file in Arduino IDE, select
+an ESP32 board, and upload it at 115200 baud. The older MicroPython files remain
+in the branch as migration reference.
+
+The Arduino sketch drives each TB6600 directly with the proven DFRobot-style
+waveform: STEP is HIGH for 1500 microseconds and LOW for 1500 microseconds.
+GPIO 25/26/27 are J1 pulse, direction, and enable; GPIO 32/33 are J2 pulse and
+direction. Start with the blade removed, fold the arm, send `ARM FOLDED`, then
+use `TEST J1 800` or `TEST J2 800` for a controlled base motor test.
+
 ## Fixed machine
 
 - 200 mm shoulder link and 200 mm elbow link
@@ -26,7 +39,7 @@ point-to-point move to unfold the arm before calling `cut_line()`.
 - GPIO 26: J1 direction
 - GPIO 32: J2 pulse
 - GPIO 33: J2 direction
-- GPIO 27: shared active-low enable
+- GPIO 27: shared enable
 
 Positive joint angles are counterclockwise when viewed from above the cutting
 plane. J1 uses the normal driver direction and J2 is inverted to match the
@@ -36,14 +49,12 @@ signal; the reported joint angles and Cartesian calculations stay unchanged.
 Coordinates use positive `X = physical right` and positive `Y = forward`.
 With both links straight, `J1=0`, `J2=0` is `(X=0, Y=400)`.
 
-The STEP outputs idle HIGH and pulse LOW. This matches the common-anode wiring
-shown earlier, where the interface sinks `PUL-` during a step.
-
-Connect each TB6600 `PUL+`, `DIR+`, and `ENA+` terminal to 3.3 V. Connect the
-matching `PUL-`, `DIR-`, and `ENA-` terminals to the GPIO pins listed above.
-STEP pulses activate `PUL-` with a LOW GPIO level. This TB6600's ENA input is
-an output-disable signal: GPIO HIGH enables the motor outputs and GPIO LOW
-disables them.
+The Arduino sketch defaults to the same signal levels as the supplied DFRobot
+test: STEP pulses HIGH, idles LOW, and GPIO 27 HIGH enables the outputs. Wire
+the TB6600 input side to match that common-cathode signal convention. If the
+existing electronics are wired common-anode, change `STEP_ACTIVE`,
+`STEP_IDLE`, `OUTPUTS_ENABLED`, and `OUTPUTS_DISABLED` at the top of the sketch
+before applying motor power.
 
 ## Files
 
