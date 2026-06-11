@@ -305,6 +305,18 @@ setting in `swivelcut.py`, upload the file again, and reset.
 
 ### 8. Normal commands
 
+For continuous encoder output, calibrate first and opt in:
+
+```text
+ARM FOLDED
+STREAM RATE 10
+STREAM ON
+```
+
+The serial monitor then prints `ENC_STREAM J1=... J2=...` continuously,
+including while the motors move or remain disarmed. Use `STREAM OFF` to stop.
+The accepted stream rate is 1-50 Hz.
+
 ```text
 ARM J1
 J1 5
