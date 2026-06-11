@@ -317,6 +317,9 @@ above.
 | `ARM J1` | Calibrates only the J1 encoder at `J1=0` for single-motor testing and teaching. | Physically fold the arm first. Use `TEACH J1`, not ordinary `TEACH`. |
 | `DISARM` | Immediately disables both motor drivers. | To resume ordinary motion, physically fold the arm and use `ARM FOLDED` again. |
 | `ENC` | Reads magnet health and measured encoder angles. | Use this after moving a disabled arm by hand. It reports sensor measurements, unlike `POS`. |
+| `STREAM ON` | Continuously prints measured encoder angles. | Opt-in; defaults to 10 Hz and continues while disarmed. |
+| `STREAM OFF` | Stops continuous encoder output. | Does not change motor state. |
+| `STREAM RATE <Hz>` | Sets continuous output from 1 to 50 Hz. | Example: `STREAM RATE 20`. |
 | `POS` | Prints the controller's current `X`, `Y`, `J1`, and `J2` state. | This is software state. It is not refreshed by arbitrary hand movement while disarmed. |
 | `J1 <deg>` | Moves J1 to an absolute shoulder angle while holding J2. | Allowed range is `-90` to `+90` degrees. |
 | `J2 <deg>` | Moves J2 to an absolute elbow angle while holding J1. | Allowed range is `-180` to `+180` degrees. |

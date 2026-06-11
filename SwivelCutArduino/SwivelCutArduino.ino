@@ -157,6 +157,11 @@ bool taughtJ1Only = false;
 bool armed = false;
 bool j1OnlyMode = false;
 bool encoderFault = false;
+bool encodersCalibrated = false;
+bool encodersJ1Only = false;
+bool encoderStreamEnabled = false;
+float encoderStreamHz = 10.0f;
+unsigned long nextEncoderStreamMs = 0;
 String inputLine;
 
 float currentJ1Deg() { return j1PositionSteps / J1_STEPS_PER_DEG; }
@@ -200,7 +205,7 @@ bool encoderJointAngles(float &j1Deg, float &j2Deg) {
   float motor1Deg = 0.0f;
   if (!j1Encoder.angleDegrees(motor1Deg)) return false;
   j1Deg = motor1Deg / J1_GEAR_RATIO;
-  if (j1OnlyMode) {
+  if (encodersJ1Only) {
     j2Deg = currentJ2Deg();
     return true;
   }
@@ -208,6 +213,29 @@ bool encoderJointAngles(float &j1Deg, float &j2Deg) {
   if (!j2Encoder.angleDegrees(motor2Deg)) return false;
   j2Deg = 180.0f + motor2Deg / J2_GEAR_RATIO;
   return true;
+}
+
+void serviceEncoderStream() {
+  if (!encoderStreamEnabled || !encodersCalibrated) return;
+  const unsigned long now = millis();
+  if (static_cast<long>(now - nextEncoderStreamMs) < 0) return;
+  nextEncoderStreamMs =
+      now + static_cast<unsigned long>(1000.0f / encoderStreamHz);
+
+  float j1Deg = 0.0f;
+  float j2Deg = 0.0f;
+  if (!encoderJointAngles(j1Deg, j2Deg)) {
+    encoderStreamEnabled = false;
+    Serial.println("ENC_STREAM ERROR: read failed; stream stopped");
+    return;
+  }
+  Serial.print("ENC_STREAM J1=");
+  Serial.print(j1Deg, 2);
+  if (!j1OnlyMode) {
+    Serial.print(" J2=");
+    Serial.print(j2Deg, 2);
+  }
+  Serial.println();
 }
 
 bool checkFeedback() {
@@ -255,6 +283,7 @@ bool executeSteps(long deltaJ1, long deltaJ2) {
       j2PositionSteps += deltaJ2 >= 0 ? 1 : -1;
     }
     pulseSelectedAxes(stepJ1, stepJ2);
+    serviceEncoderStream();
     if (USE_ENCODERS && (i & 255) == 255 && !checkFeedback()) return false;
   }
   return checkFeedback();
@@ -431,6 +460,7 @@ void recordTeach(float seconds, float hz, bool j1Only,
   const unsigned long interval = static_cast<unsigned long>(1000.0f / hz);
   for (int i = 0; i < requested; ++i) {
     while (millis() - started < static_cast<unsigned long>(i) * interval) {
+      serviceEncoderStream();
       delay(1);
     }
     float j1 = 0.0f;
@@ -488,6 +518,7 @@ void printHelp() {
   Serial.println("  XY <x> <y> [UP|DOWN]");
   Serial.println("  CUT <x0> <y0> <x1> <y1> [UP|DOWN]");
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
+  Serial.println("  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>");
   Serial.println("  PLAY | CLEAR | POS | HELP");
 }
 
@@ -497,11 +528,14 @@ void armAtFoldedPose(bool j1Only) {
   j2PositionSteps = lroundf(180.0f * J2_STEPS_PER_DEG);
   encoderFault = false;
   j1OnlyMode = j1Only;
+  encodersCalibrated = false;
+  encodersJ1Only = j1Only;
   if (USE_ENCODERS) {
     if (!j1Encoder.calibrate() || (!j1Only && !j2Encoder.calibrate())) {
       Serial.println("ERROR: encoder or magnet check failed");
       return;
     }
+    encodersCalibrated = true;
   } else if (j1Only) {
     Serial.println("ERROR: ARM J1 requires an encoder branch");
     return;
@@ -532,6 +566,34 @@ void handleCommand(String command) {
     return;
   }
   if (command == "PLAY") return replayTeach();
+  if (command == "STREAM ON") {
+    if (!encodersCalibrated) {
+      Serial.println("ERROR: type ARM FOLDED or ARM J1 before streaming");
+    } else {
+      encoderStreamEnabled = true;
+      nextEncoderStreamMs = 0;
+      Serial.println("ENC_STREAM ON");
+    }
+    return;
+  }
+  if (command == "STREAM OFF") {
+    encoderStreamEnabled = false;
+    Serial.println("ENC_STREAM OFF");
+    return;
+  }
+  float streamRate = 0.0f;
+  if (sscanf(command.c_str(), "STREAM RATE %f", &streamRate) == 1) {
+    if (streamRate < 1.0f || streamRate > 50.0f) {
+      Serial.println("ERROR: STREAM RATE must be 1-50 Hz");
+    } else {
+      encoderStreamHz = streamRate;
+      nextEncoderStreamMs = 0;
+      Serial.print("ENC_STREAM RATE ");
+      Serial.print(encoderStreamHz, 1);
+      Serial.println(" Hz");
+    }
+    return;
+  }
   if (command == "ENC") {
     if (!USE_ENCODERS) {
       Serial.println("ENC unavailable on this branch");
@@ -650,4 +712,5 @@ void loop() {
       inputLine += incoming;
     }
   }
+  serviceEncoderStream();
 }
