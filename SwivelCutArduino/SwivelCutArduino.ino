@@ -64,7 +64,7 @@ class AS5600Tracker {
  public:
   AS5600Tracker(TwoWire &wire, int sign)
       : wire_(wire), sign_(sign), calibrated_(false), lastRaw_(0),
-        turns_(0), zeroCounts_(0) {}
+        positionCounts_(0) {}
 
   bool begin(int sda, int scl) {
     wire_.begin(sda, scl, 400000);
@@ -84,8 +84,7 @@ class AS5600Tracker {
       return false;
     }
     lastRaw_ = raw;
-    turns_ = 0;
-    zeroCounts_ = raw;
+    positionCounts_ = 0;
     calibrated_ = true;
     return true;
   }
@@ -94,19 +93,29 @@ class AS5600Tracker {
     if (!calibrated_) {
       return false;
     }
-    uint16_t raw = 0;
-    if (!readRaw(raw)) {
-      return false;
+    int deltas[5] = {};
+    for (int i = 0; i < 5; ++i) {
+      uint16_t raw = 0;
+      if (!readRaw(raw)) return false;
+      int delta = static_cast<int>(raw) - static_cast<int>(lastRaw_);
+      if (delta > 2048) delta -= 4096;
+      if (delta < -2048) delta += 4096;
+      deltas[i] = delta;
     }
-    int delta = static_cast<int>(raw) - static_cast<int>(lastRaw_);
-    if (delta > 2048) {
-      --turns_;
-    } else if (delta < -2048) {
-      ++turns_;
+    for (int i = 1; i < 5; ++i) {
+      const int value = deltas[i];
+      int j = i - 1;
+      while (j >= 0 && deltas[j] > value) {
+        deltas[j + 1] = deltas[j];
+        --j;
+      }
+      deltas[j + 1] = value;
     }
-    lastRaw_ = raw;
-    const long counts = turns_ * 4096L + raw - zeroCounts_;
-    degrees = sign_ * counts * (360.0f / 4096.0f);
+    const int medianDelta = deltas[2];
+    positionCounts_ += medianDelta;
+    lastRaw_ = static_cast<uint16_t>(
+        (static_cast<int>(lastRaw_) + medianDelta + 4096) % 4096);
+    degrees = sign_ * positionCounts_ * (360.0f / 4096.0f);
     return true;
   }
 
@@ -139,8 +148,7 @@ class AS5600Tracker {
   int sign_;
   bool calibrated_;
   uint16_t lastRaw_;
-  long turns_;
-  long zeroCounts_;
+  long positionCounts_;
 };
 
 TwoWire j1Wire(0);
@@ -490,6 +498,23 @@ void recordTeach(float seconds, float hz, bool j1Only,
     taught[taughtCount++] = {
       (millis() - started) / 1000.0f, j1, j1Only ? 180.0f : j2
     };
+  }
+  for (int i = 1; i < taughtCount; ++i) {
+    const float jumpJ1 = fabsf(taught[i].j1Deg - taught[i - 1].j1Deg);
+    const float jumpJ2 = fabsf(taught[i].j2Deg - taught[i - 1].j2Deg);
+    if (jumpJ1 > 5.0f || (!j1Only && jumpJ2 > 5.0f)) {
+      Serial.print("TEACH REJECTED: encoder jump at point ");
+      Serial.print(i);
+      Serial.print(" J1=");
+      Serial.print(jumpJ1, 2);
+      if (!j1Only) {
+        Serial.print(" J2=");
+        Serial.print(jumpJ2, 2);
+      }
+      Serial.println(" deg");
+      taughtCount = 0;
+      return;
+    }
   }
   stabilizeTeachPoints(smoothingMs, maxDeviationDeg);
   Serial.print("TAUGHT: ");
