@@ -320,6 +320,9 @@ above.
 | `STREAM ON` | Continuously prints measured encoder angles. | Opt-in; defaults to 10 Hz and continues while disarmed. |
 | `STREAM OFF` | Stops continuous encoder output. | Does not change motor state. |
 | `STREAM RATE <Hz>` | Sets continuous output from 1 to 50 Hz. | Example: `STREAM RATE 20`. |
+| `FEEDBACK OFF` | Disables encoder position faults and corrective pulses. | Motor motion becomes open-loop; use only for controlled testing. |
+| `FEEDBACK ON` | Restores encoder correction and position-fault shutdown. | This is the default after every reset. |
+| `FEEDBACK STATUS` | Prints the current feedback mode. | Does not change motor state. |
 | `POS` | Prints the controller's current `X`, `Y`, `J1`, and `J2` state. | This is software state. It is not refreshed by arbitrary hand movement while disarmed. |
 | `J1 <deg>` | Moves J1 to an absolute shoulder angle while holding J2. | Allowed range is `-90` to `+90` degrees. |
 | `J2 <deg>` | Moves J2 to an absolute elbow angle while holding J1. | Allowed range is `-180` to `+180` degrees. |
