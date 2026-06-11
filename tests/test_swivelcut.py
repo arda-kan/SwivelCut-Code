@@ -20,10 +20,12 @@ class FakePin:
         self.pin = pin
         self.mode = mode
         self._value = value
+        self.history = [value]
 
     def value(self, new_value=None):
         if new_value is not None:
             self._value = new_value
+            self.history.append(new_value)
         return self._value
 
 
@@ -57,8 +59,41 @@ class SwivelCutTests(unittest.TestCase):
     def test_step_outputs_idle_high(self):
         arm = swivelcut.SwivelCut(auto_encoders=False)
 
-        self.assertEqual(arm.j1.step.value(), 1)
-        self.assertEqual(arm.j2.step.value(), 1)
+        self.assertEqual(arm.j1.step.value(), swivelcut.TB6600_INACTIVE)
+        self.assertEqual(arm.j2.step.value(), swivelcut.TB6600_INACTIVE)
+
+    def test_common_anode_step_pulse_goes_low_then_returns_high(self):
+        arm = swivelcut.SwivelCut(auto_encoders=False)
+        original_ticks_us = swivelcut.ticks_us
+        now = [0]
+
+        def advancing_ticks_us():
+            now[0] += 100000
+            return now[0]
+
+        try:
+            swivelcut.ticks_us = advancing_ticks_us
+            arm._execute(1, 0)
+        finally:
+            swivelcut.ticks_us = original_ticks_us
+
+        self.assertEqual(
+            arm.j1.step.history,
+            [
+                swivelcut.TB6600_INACTIVE,
+                swivelcut.TB6600_ACTIVE,
+                swivelcut.TB6600_INACTIVE,
+            ],
+        )
+
+    def test_common_anode_enable_is_high_and_disable_is_low(self):
+        arm = swivelcut.SwivelCut(auto_encoders=False)
+
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_ENABLED)
+        arm.enable()
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_ENABLED)
+        arm.disable()
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_DISABLED)
 
     def test_only_j2_motor_direction_is_inverted(self):
         arm = swivelcut.SwivelCut(auto_encoders=False)
@@ -321,7 +356,7 @@ class SwivelCutTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "too large"):
             arm._settle_feedback(0.0, math.radians(180))
 
-        self.assertEqual(arm.en.value(), 1)
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_DISABLED)
         self.assertIsNotNone(arm.feedback_fault)
         self.assertFalse(arm.encoder_calibrated)
 
@@ -360,7 +395,7 @@ class SwivelCutTests(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "check encoder signs"):
             arm._settle_feedback(0.0, math.radians(180))
 
-        self.assertEqual(arm.en.value(), 1)
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_DISABLED)
 
     def test_teach_stabilizer_reduces_jitter_and_preserves_endpoints(self):
         points = [
