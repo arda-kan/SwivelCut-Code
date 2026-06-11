@@ -79,14 +79,14 @@ class SwivelCutTests(unittest.TestCase):
             ],
         )
 
-    def test_common_anode_enable_is_low_and_disable_is_high(self):
+    def test_common_anode_enable_is_high_and_disable_is_low(self):
         arm = swivelcut.SwivelCut()
 
-        self.assertEqual(arm.en.value(), swivelcut.TB6600_INACTIVE)
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_ENABLED)
         arm.enable()
-        self.assertEqual(arm.en.value(), swivelcut.TB6600_ACTIVE)
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_ENABLED)
         arm.disable()
-        self.assertEqual(arm.en.value(), swivelcut.TB6600_INACTIVE)
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_DISABLED)
 
     def test_only_j2_motor_direction_is_inverted(self):
         arm = swivelcut.SwivelCut()

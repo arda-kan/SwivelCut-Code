@@ -39,12 +39,15 @@ PIN_J1_STEP = 25
 PIN_J1_DIR  = 26
 PIN_J2_STEP = 32
 PIN_J2_DIR  = 33
-PIN_ENABLE  = 27               # shared /EN, active-LOW. Set to None if unused.
+PIN_ENABLE  = 27               # shared ENA-. Set to None if unused.
 
 # Common-anode TB6600 wiring: PUL+, DIR+, and ENA+ connect to 3.3 V.
-# The ESP32 drives the corresponding minus terminals and activates them LOW.
+# The ESP32 drives the corresponding minus terminals. PUL and DIR optocouplers
+# activate LOW. On this driver, activating ENA disables the motor outputs.
 TB6600_ACTIVE = 0
 TB6600_INACTIVE = 1
+TB6600_OUTPUTS_ENABLED = 1
+TB6600_OUTPUTS_DISABLED = 0
 
 LINE_SEG_MM = 2.0              # straight cuts are split into segments this long
 
@@ -73,7 +76,7 @@ class SwivelCut:
         self.j1 = StepperAxis(PIN_J1_STEP, PIN_J1_DIR, STEPS_PER_RAD_J1, INVERT_J1)
         self.j2 = StepperAxis(PIN_J2_STEP, PIN_J2_DIR, STEPS_PER_RAD_J2, INVERT_J2)
         self.en = (
-            Pin(PIN_ENABLE, Pin.OUT, value=TB6600_INACTIVE)
+            Pin(PIN_ENABLE, Pin.OUT, value=TB6600_OUTPUTS_ENABLED)
             if PIN_ENABLE is not None else None
         )
         self.L1 = L1
@@ -83,12 +86,12 @@ class SwivelCut:
 
     def enable(self):
         if self.en:
-            self.en.value(TB6600_ACTIVE)
+            self.en.value(TB6600_OUTPUTS_ENABLED)
         sleep_us(2000)
 
     def disable(self):
         if self.en:
-            self.en.value(TB6600_INACTIVE)
+            self.en.value(TB6600_OUTPUTS_DISABLED)
 
     def forward(self, t1, t2):
         """Joint angles (rad) -> tip (x, y) mm."""

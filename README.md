@@ -41,7 +41,9 @@ shown earlier, where the interface sinks `PUL-` during a step.
 
 Connect each TB6600 `PUL+`, `DIR+`, and `ENA+` terminal to 3.3 V. Connect the
 matching `PUL-`, `DIR-`, and `ENA-` terminals to the GPIO pins listed above.
-The controller uses active-LOW GPIO logic for this arrangement.
+STEP pulses activate `PUL-` with a LOW GPIO level. This TB6600's ENA input is
+an output-disable signal: GPIO HIGH enables the motor outputs and GPIO LOW
+disables them.
 
 ## Files
 
