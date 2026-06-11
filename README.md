@@ -317,6 +317,11 @@ The serial monitor then prints `ENC_STREAM J1=... J2=...` continuously,
 including while the motors move or remain disarmed. Use `STREAM OFF` to stop.
 The accepted stream rate is 1-50 Hz.
 
+For controlled open-loop testing, `FEEDBACK OFF` disables encoder position
+faults and corrective motor pulses while leaving encoder streaming and teaching
+available. Restore normal protection with `FEEDBACK ON`; feedback defaults to
+on after every reset. `FEEDBACK STATUS` prints the current mode.
+
 ```text
 ARM J1
 J1 5

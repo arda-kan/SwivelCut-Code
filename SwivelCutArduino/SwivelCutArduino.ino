@@ -167,6 +167,7 @@ bool j1OnlyMode = false;
 bool encoderFault = false;
 bool encodersCalibrated = false;
 bool encodersJ1Only = false;
+bool encoderFeedbackEnabled = true;
 bool encoderStreamEnabled = false;
 float encoderStreamHz = 10.0f;
 unsigned long nextEncoderStreamMs = 0;
@@ -247,7 +248,7 @@ void serviceEncoderStream() {
 }
 
 bool checkFeedback() {
-  if (!USE_ENCODERS) return true;
+  if (!USE_ENCODERS || !encoderFeedbackEnabled) return true;
   float measuredJ1 = 0.0f;
   float measuredJ2 = 0.0f;
   if (!encoderJointAngles(measuredJ1, measuredJ2)) {
@@ -338,7 +339,7 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
     long targetJ2 = lroundf(j2Deg * J2_STEPS_PER_DEG);
     if (!executeSteps(targetJ1 - j1PositionSteps,
                       targetJ2 - j2PositionSteps)) return false;
-    if (!USE_ENCODERS) break;
+    if (!USE_ENCODERS || !encoderFeedbackEnabled) break;
 
     float measuredJ1 = 0.0f;
     float measuredJ2 = 0.0f;
@@ -575,6 +576,7 @@ void printHelp() {
   Serial.println("  CUT <x0> <y0> <x1> <y1> [UP|DOWN]");
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
   Serial.println("  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>");
+  Serial.println("  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS");
   Serial.println("  PLAY | CLEAR | POS | HELP");
 }
 
@@ -622,6 +624,23 @@ void handleCommand(String command) {
     return;
   }
   if (command == "PLAY") return replayTeach();
+  if (command == "FEEDBACK ON") {
+    encoderFeedbackEnabled = true;
+    Serial.println("FEEDBACK ON: correction and position faults enabled");
+    return;
+  }
+  if (command == "FEEDBACK OFF") {
+    encoderFeedbackEnabled = false;
+    Serial.println("WARNING: FEEDBACK OFF; motor motion is open-loop");
+    return;
+  }
+  if (command == "FEEDBACK STATUS") {
+    Serial.println(
+        encoderFeedbackEnabled
+            ? "FEEDBACK ON: correction and position faults enabled"
+            : "FEEDBACK OFF: motor motion is open-loop");
+    return;
+  }
   if (command == "STREAM ON") {
     if (!encodersCalibrated) {
       Serial.println("ERROR: type ARM FOLDED or ARM J1 before streaming");
