@@ -21,7 +21,7 @@ use `TEST J1 800` or `TEST J2 800` for a controlled base motor test.
 - NEMA 23 shoulder motor with 6:1 pulley reduction
 - NEMA 17 elbow motor mounted on link 1 with 9:1 pulley reduction
 - 200 full steps per motor revolution
-- TB6600 drivers set to 1/32 microstepping
+- TB6600 drivers set to 1/4 microstepping
 - Required startup pose: J1 = 0 degrees, J2 = 180 degrees (fully folded)
 - J1 software travel: -90 to +90 degrees
 - J2 software travel: -180 to +180 degrees
@@ -150,7 +150,7 @@ branch assumes motor-shaft mounting and divides measured motor rotation by the
 ### 1. Wire and configure the hardware
 
 Use two TB6600 drivers: one for the NEMA 23 and one for the NEMA 17. Both motors
-are 200 full steps per revolution; set both TB6600 drivers to 1/32
+are 200 full steps per revolution; set both TB6600 drivers to 1/4
 microstepping. Set each driver's current limit for its own motor; do not assume
 both motors use the same current.
 
