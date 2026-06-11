@@ -41,6 +41,11 @@ PIN_J2_STEP = 32
 PIN_J2_DIR  = 33
 PIN_ENABLE  = 27               # shared /EN, active-LOW. Set to None if unused.
 
+# Common-anode TB6600 wiring: PUL+, DIR+, and ENA+ connect to 3.3 V.
+# The ESP32 drives the corresponding minus terminals and activates them LOW.
+TB6600_ACTIVE = 0
+TB6600_INACTIVE = 1
+
 LINE_SEG_MM = 2.0              # straight cuts are split into segments this long
 
 TWO_PI = 2.0 * math.pi
@@ -50,8 +55,8 @@ STEPS_PER_RAD_J2 = STEPS_PER_MOTOR_REV * MICROSTEP * GEAR_J2 / TWO_PI
 
 class StepperAxis:
     def __init__(self, step_pin, dir_pin, steps_per_rad, invert=False):
-        self.step = Pin(step_pin, Pin.OUT, value=1)
-        self.dir  = Pin(dir_pin, Pin.OUT, value=0)
+        self.step = Pin(step_pin, Pin.OUT, value=TB6600_INACTIVE)
+        self.dir  = Pin(dir_pin, Pin.OUT, value=TB6600_ACTIVE)
         self.steps_per_rad = steps_per_rad
         self.invert = invert
         self.pos = 0
@@ -60,14 +65,17 @@ class StepperAxis:
         forward = (sign > 0)
         if self.invert:
             forward = not forward
-        self.dir.value(1 if forward else 0)
+        self.dir.value(TB6600_INACTIVE if forward else TB6600_ACTIVE)
 
 
 class SwivelCut:
     def __init__(self):
         self.j1 = StepperAxis(PIN_J1_STEP, PIN_J1_DIR, STEPS_PER_RAD_J1, INVERT_J1)
         self.j2 = StepperAxis(PIN_J2_STEP, PIN_J2_DIR, STEPS_PER_RAD_J2, INVERT_J2)
-        self.en = Pin(PIN_ENABLE, Pin.OUT, value=1) if PIN_ENABLE is not None else None
+        self.en = (
+            Pin(PIN_ENABLE, Pin.OUT, value=TB6600_INACTIVE)
+            if PIN_ENABLE is not None else None
+        )
         self.L1 = L1
         self.L2 = L2
         self.coupling = COUPLING
@@ -75,12 +83,12 @@ class SwivelCut:
 
     def enable(self):
         if self.en:
-            self.en.value(0)
+            self.en.value(TB6600_ACTIVE)
         sleep_us(2000)
 
     def disable(self):
         if self.en:
-            self.en.value(1)
+            self.en.value(TB6600_INACTIVE)
 
     def forward(self, t1, t2):
         """Joint angles (rad) -> tip (x, y) mm."""
@@ -287,16 +295,16 @@ class SwivelCut:
                 else:
                     do1 = False
             if major_is_1:
-                step1.value(0)
+                step1.value(TB6600_ACTIVE)
                 if do2:
-                    step2.value(0)
+                    step2.value(TB6600_ACTIVE)
             else:
-                step2.value(0)
+                step2.value(TB6600_ACTIVE)
                 if do1:
-                    step1.value(0)
+                    step1.value(TB6600_ACTIVE)
             sleep_us(PULSE_US)
-            step1.value(1)
-            step2.value(1)
+            step1.value(TB6600_INACTIVE)
+            step2.value(TB6600_INACTIVE)
 
             if major_is_1:
                 self.j1.pos += s1

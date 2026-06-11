@@ -39,6 +39,10 @@ With both links straight, `J1=0`, `J2=0` is `(X=0, Y=400)`.
 The STEP outputs idle HIGH and pulse LOW. This matches the common-anode wiring
 shown earlier, where the interface sinks `PUL-` during a step.
 
+Connect each TB6600 `PUL+`, `DIR+`, and `ENA+` terminal to 3.3 V. Connect the
+matching `PUL-`, `DIR-`, and `ENA-` terminals to the GPIO pins listed above.
+The controller uses active-LOW GPIO logic for this arrangement.
+
 ## Files
 
 - `swivelcut.py`: MicroPython controller for an ESP32 and two stepper axes.
