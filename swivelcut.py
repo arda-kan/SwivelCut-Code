@@ -25,10 +25,10 @@ INVERT_J1 = False
 INVERT_J2 = True
 
 # Motion timing
-MAX_STEP_RATE = 1500.0         # cruise ceiling [microsteps / s]
-ACCEL = 3000.0                 # acceleration [microsteps / s^2]
-PULSE_US = 10                  # conservative pulse width for TB6600 inputs
-DIR_SETUP_US = 10              # direction setup time before the first pulse
+MAX_STEP_RATE = 100.0          # cruise ceiling [microsteps / s]
+ACCEL = 100.0                  # acceleration [microsteps / s^2]
+STEP_ACTIVE_DUTY = 0.5         # active-LOW fraction of each step period
+DIR_SETUP_US = 100             # direction setup time before the first pulse
 
 # Software travel limits
 J1_MIN, J1_MAX = -90.0, 90.0
@@ -305,7 +305,7 @@ class SwivelCut:
                 step2.value(TB6600_ACTIVE)
                 if do1:
                     step1.value(TB6600_ACTIVE)
-            sleep_us(PULSE_US)
+            sleep_us(max(1, int(c * STEP_ACTIVE_DUTY)))
             step1.value(TB6600_INACTIVE)
             step2.value(TB6600_INACTIVE)
 

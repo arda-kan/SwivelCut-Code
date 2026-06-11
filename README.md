@@ -45,6 +45,11 @@ STEP pulses activate `PUL-` with a LOW GPIO level. This TB6600's ENA input is
 an output-disable signal: GPIO HIGH enables the motor outputs and GPIO LOW
 disables them.
 
+This branch generates a 50% STEP waveform. At the configured 100 pulses/s
+cruise rate, each 10 ms period is LOW for 5 ms and HIGH for approximately 5 ms.
+During acceleration, both halves lengthen together while retaining the 50%
+active-LOW duty cycle.
+
 ## Files
 
 - `swivelcut.py`: MicroPython controller for an ESP32 and two stepper axes.

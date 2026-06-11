@@ -30,7 +30,8 @@ class FakePin:
 
 
 sys.modules["machine"] = types.SimpleNamespace(Pin=FakePin)
-time.sleep_us = lambda _value: None
+sleep_calls = []
+time.sleep_us = lambda value: sleep_calls.append(value)
 time.ticks_us = lambda: 0
 time.ticks_diff = lambda first, second: first - second
 time.ticks_add = lambda value, delta: value + delta
@@ -39,6 +40,9 @@ swivelcut = importlib.import_module("swivelcut")
 
 
 class SwivelCutTests(unittest.TestCase):
+    def setUp(self):
+        sleep_calls.clear()
+
     def test_startup_state_is_folded(self):
         arm = swivelcut.SwivelCut()
 
@@ -78,6 +82,24 @@ class SwivelCutTests(unittest.TestCase):
                 swivelcut.TB6600_INACTIVE,
             ],
         )
+
+    def test_step_active_phase_is_half_the_cruise_period(self):
+        arm = swivelcut.SwivelCut()
+        original_ticks_us = swivelcut.ticks_us
+        now = [0]
+
+        def advancing_ticks_us():
+            now[0] += 100000
+            return now[0]
+
+        try:
+            swivelcut.ticks_us = advancing_ticks_us
+            arm._execute(1, 0, ramp_in=False, ramp_out=False)
+        finally:
+            swivelcut.ticks_us = original_ticks_us
+
+        period_us = int(1.0e6 / swivelcut.MAX_STEP_RATE)
+        self.assertEqual(sleep_calls[-1], int(period_us * 0.5))
 
     def test_common_anode_enable_is_high_and_disable_is_low(self):
         arm = swivelcut.SwivelCut()
