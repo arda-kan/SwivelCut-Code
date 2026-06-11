@@ -13,7 +13,7 @@ constexpr int J2_DIR_PIN = 33;
 constexpr int ENA_PIN = 27;
 
 constexpr int FULL_STEPS_PER_REV = 200;
-constexpr int MICROSTEP = 32;
+constexpr int MICROSTEP = 4;  // TB6600 DIP switches must also be set to 1/4.
 constexpr float J1_GEAR_RATIO = 6.0f;
 constexpr float J2_GEAR_RATIO = 9.0f;
 constexpr float LINK_1_MM = 200.0f;
