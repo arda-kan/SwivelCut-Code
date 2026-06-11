@@ -62,6 +62,10 @@ With both links straight, `J1=0`, `J2=0` is `(X=0, Y=400)`.
 The STEP outputs idle HIGH and pulse LOW. This matches the common-anode wiring
 shown earlier, where the interface sinks `PUL-` during a step.
 
+Connect each TB6600 `PUL+`, `DIR+`, and `ENA+` terminal to 3.3 V. Connect the
+matching minus terminals to the GPIO pins listed above. STEP pulses drive
+`PUL-` LOW. `ENA-` stays HIGH to enable the motor and goes LOW to disable it.
+
 ## ESP32 to AS5600 wiring
 
 Both AS5600 modules have the fixed I2C address `0x36`. They cannot be connected
