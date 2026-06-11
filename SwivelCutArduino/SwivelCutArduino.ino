@@ -246,10 +246,27 @@ bool checkFeedback() {
     feedbackFault("AS5600 read failed");
     return false;
   }
-  if (fabsf(measuredJ1 - currentJ1Deg()) > FEEDBACK_MAX_ERROR_DEG ||
-      (!j1OnlyMode &&
-       fabsf(measuredJ2 - currentJ2Deg()) > FEEDBACK_MAX_ERROR_DEG)) {
-    feedbackFault("encoder error exceeded limit");
+  const float errorJ1 = measuredJ1 - currentJ1Deg();
+  const float errorJ2 = measuredJ2 - currentJ2Deg();
+  if (fabsf(errorJ1) > FEEDBACK_MAX_ERROR_DEG ||
+      (!j1OnlyMode && fabsf(errorJ2) > FEEDBACK_MAX_ERROR_DEG)) {
+    disableDrivers();
+    encoderFault = true;
+    Serial.print("FEEDBACK FAULT: expected J1=");
+    Serial.print(currentJ1Deg(), 2);
+    Serial.print(" measured J1=");
+    Serial.print(measuredJ1, 2);
+    Serial.print(" error=");
+    Serial.print(errorJ1, 2);
+    if (!j1OnlyMode) {
+      Serial.print("; expected J2=");
+      Serial.print(currentJ2Deg(), 2);
+      Serial.print(" measured J2=");
+      Serial.print(measuredJ2, 2);
+      Serial.print(" error=");
+      Serial.print(errorJ2, 2);
+    }
+    Serial.println();
     return false;
   }
   return true;
@@ -477,7 +494,11 @@ void recordTeach(float seconds, float hz, bool j1Only,
   stabilizeTeachPoints(smoothingMs, maxDeviationDeg);
   Serial.print("TAUGHT: ");
   Serial.print(taughtCount);
-  Serial.println(" points; type PLAY");
+  Serial.print(" points, J1 ");
+  Serial.print(taught[0].j1Deg, 2);
+  Serial.print(" -> ");
+  Serial.print(taught[taughtCount - 1].j1Deg, 2);
+  Serial.println("; type PLAY");
 }
 
 void replayTeach() {
@@ -496,9 +517,19 @@ void replayTeach() {
   j2PositionSteps = lroundf(measuredJ2 * J2_STEPS_PER_DEG);
   enableDrivers();
   armed = true;
+  Serial.print("PLAY RETURN: J1 ");
+  Serial.print(measuredJ1, 2);
+  Serial.print(" -> ");
+  Serial.println(taught[0].j1Deg, 2);
   if (!moveToAngles(taught[0].j1Deg, taught[0].j2Deg, false)) return;
   for (int i = 1; i < taughtCount; ++i) {
-    if (!moveToAngles(taught[i].j1Deg, taught[i].j2Deg, false)) return;
+    if (!moveToAngles(taught[i].j1Deg, taught[i].j2Deg, false)) {
+      Serial.print("PLAY STOPPED AT POINT ");
+      Serial.print(i);
+      Serial.print("/");
+      Serial.println(taughtCount - 1);
+      return;
+    }
   }
   Serial.print("PLAYED: ");
   Serial.print(taughtCount);
