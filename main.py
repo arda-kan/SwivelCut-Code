@@ -1,6 +1,6 @@
-"""Start the SwivelCut USB console at boot."""
+"""Start the physical SwivelCut product controls at boot."""
 
-from serial_console import run_console
+from product_controller import run_product_controller
 
 
-run_console()
+run_product_controller()

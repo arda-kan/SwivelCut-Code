@@ -116,6 +116,68 @@ expose the ESP32 pins to 5 V. Do not connect VCC to the motor power supply.
 Confirm the exact pin labels printed on the purchased modules before applying
 power; some boards arrange the header pins differently.
 
+## Product buttons and attachment detection
+
+`main.py` starts the physical product controller. The on/off control is a
+hardware latching power switch and is not connected to an ESP32 input. Use a
+switch, contactor, or power module rated for the actual motor-supply current;
+the physical power disconnect remains the primary emergency stop.
+
+The three momentary logic buttons connect between these pins and ground. The
+firmware enables each ESP32 input's internal pull-up.
+
+| Button | ESP32 pin | Behavior |
+| --- | ---: | --- |
+| Start/Stop | GPIO 18 | Start/stop teaching, start cutting, or abort a cut |
+| Stabilization | GPIO 19 | Toggle recorded-path smoothing for the next cut |
+| Repeat | GPIO 23 | Repeat the last taught cut with the cutting head fitted |
+
+The attachment needs only an ID contact and ground contact. Fit an external
+`10 kOhm` pull-up from `3V3` to GPIO 34 on the fixed arm, then connect GPIO 34
+and ground through the pogo pins:
+
+| Attachment | Resistor inside attachment |
+| --- | ---: |
+| Tracing head | `10 kOhm` from ID to ground |
+| Cutting head | `2.2 kOhm` from ID to ground |
+
+This produces approximately half-scale ADC for the tracing head, approximately
+18% scale for the cutting head, and full scale when disconnected. GPIO 34 has
+no internal pull-up. The ranges in `product_controller.py` intentionally leave
+gaps so a loose, damaged, or unknown attachment cannot be treated as a cutting
+head. Check actual `read_u16()` values on the assembled unit and adjust the
+ranges if resistor tolerance, wiring, or the ESP32 ADC shifts them.
+
+The blade actuator uses an H-bridge:
+
+| H-bridge input | ESP32 pin |
+| --- | ---: |
+| Blade A | GPIO 13 |
+| Blade B | GPIO 14 |
+
+The default is a 500 ms forward pulse to extend and a 500 ms reverse pulse to
+retract. Set `BLADE_DRIVE_MS` for the real mechanism. If a one-direction cam
+extends and retracts on successive activations, set
+`BLADE_REVERSE_TO_RETRACT = False`. Limit switches or position feedback are
+strongly recommended because timing alone cannot prove the razor is retracted.
+With a one-direction cam, place the mechanism in its retracted phase before
+power-on because firmware cannot infer the cam phase after power is removed.
+
+### Button workflow
+
+1. Fold the arm to J1 = 0 degrees and J2 = 180 degrees, then switch power on.
+2. Fit the tracing head and press Start/Stop to begin teaching.
+3. Guide the arm, then press Start/Stop again to retain the raw recording.
+4. Fit the cutting head and optionally press Stabilization.
+5. Press Start/Stop to extend the razor and replay the path.
+6. Press Repeat to run the same cut again.
+
+Stabilization is applied from the untouched raw recording immediately before
+each cut. Removing the active head or pressing Start/Stop during cutting stops
+step generation, disables the arm drivers, and retracts the blade. Completion,
+feedback errors, and other exceptions also retract the blade. Teaching is
+limited to 60 seconds to bound ESP32 RAM use.
+
 The supplied diametric magnet must be centered on the motor shaft, parallel to
 the sensor face, and held at a stable gap. `ARM FOLDED` refuses to arm if either
 AS5600 reports a missing, weak, or excessively strong magnetic field.
@@ -141,8 +203,9 @@ branch assumes motor-shaft mounting and divides measured motor rotation by the
 - `as5600.py`: AS5600 register access and wrap-safe multi-turn tracking.
 - `encoder_test.py`: standalone wiring, angle, and magnet diagnostic.
 - `swivelcut.py`: MicroPython controller for an ESP32 and two stepper axes.
+- `product_controller.py`: buttons, head ID, blade actuator, and product state.
 - `serial_console.py`: guarded USB serial command parser.
-- `main.py`: starts the serial console automatically when the ESP32 boots.
+- `main.py`: starts the physical product controls when the ESP32 boots.
 - `swivelcut_visualizer.html`: browser visualizer for geometry, IK, and motion.
 
 ## Running it on the ESP32
@@ -250,6 +313,7 @@ Run this from the repository directory:
 ```sh
 python3 -m mpremote connect auto fs cp swivelcut.py :swivelcut.py
 python3 -m mpremote connect auto fs cp as5600.py :as5600.py
+python3 -m mpremote connect auto fs cp product_controller.py :product_controller.py
 python3 -m mpremote connect auto fs cp serial_console.py :serial_console.py
 python3 -m mpremote connect auto fs cp main.py :main.py
 python3 -m mpremote connect auto reset
@@ -257,24 +321,23 @@ python3 -m mpremote connect auto reset
 
 MicroPython automatically executes `main.py` after boot.
 
-### 6. Open the command terminal
+### 6. Open the status terminal
 
 ```sh
 python3 -m mpremote connect auto repl
 ```
 
-Exit the terminal later with `Ctrl-]` or `Ctrl-X`.
+The product controller prints head, teaching, stabilization, cutting, stop, and
+error status. Exit the terminal later with `Ctrl-]` or `Ctrl-X`.
 
 ### 7. Confirm startup and test slowly
 
-Physically place the arm in the fully folded pose before every reset. Then type:
+Physically place the arm in the fully folded pose before every reset or
+power-on. The product controller checks both magnets and calibrates that pose
+automatically. It leaves the arm drivers disabled until a cut starts.
 
-```text
-ARM FOLDED
-```
-
-The drivers remain disabled until both magnets pass their AS5600 diagnostics
-and this exact confirmation is received.
+For bench testing through the command console instead, temporarily change
+`main.py` to import and call `run_console()` from `serial_console.py`.
 
 Before powered movement, verify encoder directions with the blade removed:
 

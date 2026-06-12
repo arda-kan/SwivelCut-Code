@@ -95,6 +95,16 @@ class SwivelCutTests(unittest.TestCase):
         arm.disable()
         self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_DISABLED)
 
+    def test_motion_abort_check_stops_during_step_generation(self):
+        arm = swivelcut.SwivelCut(auto_encoders=False)
+        arm.motion_abort_check = lambda: True
+
+        with self.assertRaises(swivelcut.MotionAborted):
+            arm._execute(10, 0)
+
+        self.assertEqual(arm.j1.pos, 0)
+        self.assertEqual(arm.en.value(), swivelcut.TB6600_OUTPUTS_DISABLED)
+
     def test_only_j2_motor_direction_is_inverted(self):
         arm = swivelcut.SwivelCut(auto_encoders=False)
 
@@ -326,6 +336,24 @@ class SwivelCutTests(unittest.TestCase):
 
         with self.assertRaisesRegex(Exception, "cannot move J2"):
             arm.replay_teach()
+
+    def test_replay_calls_blade_hook_after_returning_to_start(self):
+        arm = swivelcut.SwivelCut(auto_encoders=False)
+        arm.encoders = (object(), object())
+        arm.encoder_calibrated = True
+        arm.encoder_mode = "dual"
+        arm.teach_points = [(0, 1.0, 179.0), (50, 2.0, 178.0)]
+        arm.teach_mode = "dual"
+        events = []
+        arm.move_to_angles = lambda *_args: events.append("at-start")
+        arm._move_to_angles_once = lambda *_args, **_kwargs: events.append(
+            "path"
+        )
+        arm._settle_feedback = lambda *_args: None
+
+        arm.replay_teach(before_path=lambda: events.append("blade-extend"))
+
+        self.assertEqual(events[:3], ["at-start", "blade-extend", "path"])
 
     def test_j1_mode_requires_explicit_j1_teach_option(self):
         arm = swivelcut.SwivelCut(auto_encoders=False)

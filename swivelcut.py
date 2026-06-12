@@ -80,6 +80,10 @@ STEPS_PER_RAD_J1 = STEPS_PER_MOTOR_REV * MICROSTEP * GEAR_J1 / TWO_PI
 STEPS_PER_RAD_J2 = STEPS_PER_MOTOR_REV * MICROSTEP * GEAR_J2 / TWO_PI
 
 
+class MotionAborted(Exception):
+    """Raised when an external control requests an immediate motion stop."""
+
+
 class StepperAxis:
     def __init__(self, step_pin, dir_pin, steps_per_rad, invert=False):
         self.step = Pin(step_pin, Pin.OUT, value=TB6600_INACTIVE)
@@ -116,6 +120,7 @@ class SwivelCut:
         self.encoder_calibrated = False
         self.encoder_mode = None
         self.feedback_fault = None
+        self.motion_abort_check = None
         self.teach_points = []
         self.teach_mode = None
         self.set_folded_start()
@@ -559,7 +564,7 @@ class SwivelCut:
         self.sync_from_encoders()
         return len(points)
 
-    def replay_teach(self):
+    def replay_teach(self, before_path=None):
         """Return to the recorded start and reproduce the taught trajectory."""
         if len(self.teach_points) < 2:
             raise ValueError("no taught movement; use TEACH first")
@@ -581,6 +586,8 @@ class SwivelCut:
         self.enable()
         first = self.teach_points[0]
         self.move_to_angles(first[1], first[2])
+        if before_path is not None:
+            before_path()
         replay_start = ticks_ms()
         for index in range(1, len(self.teach_points)):
             elapsed, t1_deg, t2_deg = self.teach_points[index]
@@ -639,6 +646,10 @@ class SwivelCut:
 
         t_next = ticks_us()
         for i in range(total):
+            if self.motion_abort_check and self.motion_abort_check():
+                self.disable()
+                raise MotionAborted("motion stopped by product controls")
+
             # The major axis steps every cycle. Error tracking spaces out the
             # minor-axis steps so both joints finish together.
             do2 = False
