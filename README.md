@@ -63,6 +63,36 @@ feedback errors during powered movement still disable the driver.
 - GPIO 32: J2 pulse
 - GPIO 33: J2 direction
 - GPIO 27: shared enable
+- GPIO 13/14: blade H-bridge inputs
+- GPIO 18: Start/Stop button, normally open to GND
+- GPIO 19: Stabilization button, normally open to GND
+- GPIO 23: Repeat button, normally open to GND
+- GPIO 34: head-ID voltage-divider ADC input
+
+GPIO18, GPIO19, and GPIO23 use the ESP32 internal pull-ups. A pressed button
+reads LOW and a released button reads HIGH. The firmware debounces each input
+for 35 ms and prints named `PRESSED` and `RELEASED` events. The latching power
+switch cuts hardware power directly and is not connected to a GPIO.
+
+The head-ID divider is:
+
+```text
+3.3V -- 10k fixed resistor -- GPIO34 -- head resistor -- GND
+```
+
+The firmware uses 12-bit ADC readings and requires five consecutive matching
+classifications before reporting a head change:
+
+| Head | Head resistor | Accepted ADC range |
+| --- | ---: | ---: |
+| Cutting | 2.2k | 400-1125 |
+| Tracing | 10k | 1500-2550 |
+| Disconnected | Open | 3500-4095 |
+| Unknown | Any other reading | Outside the ranges above |
+
+Use `CONTROLS` in the serial console to print all three button states and the
+current head type/ADC value. Button and stable head changes are also printed
+automatically.
 
 Positive joint angles are counterclockwise when viewed from above the cutting
 plane. J1 uses the normal driver direction and J2 is inverted to match the
@@ -324,6 +354,7 @@ above.
 | `FEEDBACK OFF` | Disables encoder position faults and corrective pulses. | Motor motion becomes open-loop; use only for controlled testing. |
 | `FEEDBACK ON` | Restores encoder correction and position-fault shutdown. | This is the default after every reset. |
 | `FEEDBACK STATUS` | Prints the current feedback mode. | Does not change motor state. |
+| `CONTROLS` | Prints all three debounced button states, the hardware-only power switch note, and the stable head ID with its ADC reading. | Button and stable head changes are also printed automatically. |
 | `POS` | Prints the controller's current `X`, `Y`, `J1`, and `J2` state. | This is software state. It is not refreshed by arbitrary hand movement while disarmed. |
 | `J1 <deg>` | Moves J1 to an absolute shoulder angle while holding J2. | Allowed range is `-90` to `+90` degrees. |
 | `J2 <deg>` | Moves J2 to an absolute elbow angle while holding J1. | Allowed range is `-180` to `+180` degrees. |

@@ -11,6 +11,22 @@ constexpr int J1_DIR_PIN = 26;
 constexpr int J2_PUL_PIN = 32;
 constexpr int J2_DIR_PIN = 33;
 constexpr int ENA_PIN = 27;
+constexpr int BLADE_IN1_PIN = 13;
+constexpr int BLADE_IN2_PIN = 14;
+
+constexpr int START_STOP_BUTTON_PIN = 18;
+constexpr int STABILIZATION_BUTTON_PIN = 19;
+constexpr int REPEAT_BUTTON_PIN = 23;
+constexpr int HEAD_ID_PIN = 34;
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 35;
+constexpr unsigned long HEAD_SAMPLE_INTERVAL_MS = 20;
+constexpr int HEAD_STABLE_SAMPLE_COUNT = 5;
+
+constexpr int CUTTING_HEAD_ADC_MIN = 400;
+constexpr int CUTTING_HEAD_ADC_MAX = 1125;
+constexpr int TRACING_HEAD_ADC_MIN = 1500;
+constexpr int TRACING_HEAD_ADC_MAX = 2550;
+constexpr int HEAD_DISCONNECTED_ADC_MIN = 3500;
 
 constexpr int FULL_STEPS_PER_REV = 200;
 constexpr int MICROSTEP = 4;  // TB6600 DIP switches must also be set to 1/4.
@@ -58,6 +74,22 @@ struct TeachPoint {
   float seconds;
   float j1Deg;
   float j2Deg;
+};
+
+struct ButtonInput {
+  int pin;
+  int number;
+  const char *name;
+  int rawState;
+  int stableState;
+  unsigned long rawChangedMs;
+};
+
+enum class HeadType {
+  UNKNOWN,
+  CUTTING,
+  TRACING,
+  DISCONNECTED,
 };
 
 class AS5600Tracker {
@@ -199,8 +231,116 @@ float encoderStreamHz = 10.0f;
 unsigned long nextEncoderStreamMs = 0;
 String inputLine;
 
+ButtonInput buttons[] = {
+    {START_STOP_BUTTON_PIN, 1, "START_STOP", HIGH, HIGH, 0},
+    {STABILIZATION_BUTTON_PIN, 2, "STABILIZATION", HIGH, HIGH, 0},
+    {REPEAT_BUTTON_PIN, 3, "REPEAT", HIGH, HIGH, 0},
+};
+constexpr size_t BUTTON_COUNT = sizeof(buttons) / sizeof(buttons[0]);
+
+HeadType stableHeadType = HeadType::UNKNOWN;
+HeadType candidateHeadType = HeadType::UNKNOWN;
+int candidateHeadSamples = 0;
+int latestHeadAdc = 0;
+bool headTypeInitialized = false;
+unsigned long nextHeadSampleMs = 0;
+
 float currentJ1Deg() { return j1PositionSteps / J1_STEPS_PER_DEG; }
 float currentJ2Deg() { return j2PositionSteps / J2_STEPS_PER_DEG; }
+
+const char *headTypeName(HeadType type) {
+  switch (type) {
+    case HeadType::CUTTING:
+      return "CUTTING";
+    case HeadType::TRACING:
+      return "TRACING";
+    case HeadType::DISCONNECTED:
+      return "DISCONNECTED";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+HeadType classifyHeadAdc(int adc) {
+  if (adc >= HEAD_DISCONNECTED_ADC_MIN) return HeadType::DISCONNECTED;
+  if (adc >= CUTTING_HEAD_ADC_MIN && adc <= CUTTING_HEAD_ADC_MAX) {
+    return HeadType::CUTTING;
+  }
+  if (adc >= TRACING_HEAD_ADC_MIN && adc <= TRACING_HEAD_ADC_MAX) {
+    return HeadType::TRACING;
+  }
+  return HeadType::UNKNOWN;
+}
+
+void printButtonEvent(const ButtonInput &button) {
+  Serial.print("BUTTON ");
+  Serial.print(button.number);
+  Serial.print(" ");
+  Serial.print(button.name);
+  Serial.print(" GPIO");
+  Serial.print(button.pin);
+  Serial.println(button.stableState == LOW ? " PRESSED" : " RELEASED");
+}
+
+void printControlStatus() {
+  Serial.print("CONTROLS");
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    Serial.print(" B");
+    Serial.print(buttons[i].number);
+    Serial.print("_");
+    Serial.print(buttons[i].name);
+    Serial.print("=");
+    Serial.print(buttons[i].stableState == LOW ? "PRESSED" : "RELEASED");
+  }
+  Serial.print(" POWER_SWITCH=HARDWARE_ONLY");
+  latestHeadAdc = analogRead(HEAD_ID_PIN);
+  const HeadType measuredHead = classifyHeadAdc(latestHeadAdc);
+  Serial.print(" HEAD=");
+  Serial.print(headTypeName(
+      headTypeInitialized ? stableHeadType : measuredHead));
+  Serial.print(" ADC=");
+  Serial.println(latestHeadAdc);
+}
+
+void serviceControlInputs() {
+  const unsigned long now = millis();
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    ButtonInput &button = buttons[i];
+    const int raw = digitalRead(button.pin);
+    if (raw != button.rawState) {
+      button.rawState = raw;
+      button.rawChangedMs = now;
+    }
+    if (raw != button.stableState &&
+        now - button.rawChangedMs >= BUTTON_DEBOUNCE_MS) {
+      button.stableState = raw;
+      printButtonEvent(button);
+    }
+  }
+
+  if (static_cast<long>(now - nextHeadSampleMs) < 0) return;
+  nextHeadSampleMs = now + HEAD_SAMPLE_INTERVAL_MS;
+  latestHeadAdc = analogRead(HEAD_ID_PIN);
+  const HeadType measuredHead = classifyHeadAdc(latestHeadAdc);
+  if (measuredHead == candidateHeadType) {
+    if (candidateHeadSamples < HEAD_STABLE_SAMPLE_COUNT) {
+      ++candidateHeadSamples;
+    }
+  } else {
+    candidateHeadType = measuredHead;
+    candidateHeadSamples = 1;
+  }
+
+  if (candidateHeadSamples >= HEAD_STABLE_SAMPLE_COUNT &&
+      (!headTypeInitialized || candidateHeadType != stableHeadType)) {
+    stableHeadType = candidateHeadType;
+    headTypeInitialized = true;
+    Serial.print("HEAD ");
+    Serial.print(headTypeName(stableHeadType));
+    Serial.print(" ADC=");
+    Serial.println(latestHeadAdc);
+  }
+}
 
 void enableDrivers() {
   digitalWrite(ENA_PIN, OUTPUTS_ENABLED);
@@ -359,6 +499,7 @@ bool executeSteps(long deltaJ1, long deltaJ2) {
       j2PositionSteps += deltaJ2 >= 0 ? 1 : -1;
     }
     pulseSelectedAxes(stepJ1, stepJ2);
+    serviceControlInputs();
     serviceEncoderStream();
     if (USE_ENCODERS && (i & 255) == 255 && !checkFeedback()) return false;
   }
@@ -557,6 +698,7 @@ void recordTeach(float seconds, float hz, bool j1Only,
   const unsigned long interval = static_cast<unsigned long>(1000.0f / hz);
   for (int i = 0; i < requested; ++i) {
     while (millis() - started < static_cast<unsigned long>(i) * interval) {
+      serviceControlInputs();
       serviceEncoderStream();
       delay(1);
     }
@@ -648,6 +790,7 @@ void printHelp() {
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
   Serial.println("  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>");
   Serial.println("  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS");
+  Serial.println("  CONTROLS");
   Serial.println("  PLAY | CLEAR | POS | HELP");
 }
 
@@ -699,6 +842,7 @@ void handleCommand(String command) {
     return;
   }
   if (command == "POS") return printPosition();
+  if (command == "CONTROLS") return printControlStatus();
   if (command == "HELP") return printHelp();
   if (command == "CLEAR") {
     taughtCount = 0;
@@ -856,14 +1000,30 @@ void setup() {
   pinMode(J2_PUL_PIN, OUTPUT);
   pinMode(J2_DIR_PIN, OUTPUT);
   pinMode(ENA_PIN, OUTPUT);
+  pinMode(BLADE_IN1_PIN, OUTPUT);
+  pinMode(BLADE_IN2_PIN, OUTPUT);
+  pinMode(START_STOP_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(STABILIZATION_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(REPEAT_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(HEAD_ID_PIN, INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(HEAD_ID_PIN, ADC_11db);
   digitalWrite(J1_PUL_PIN, STEP_IDLE);
   digitalWrite(J2_PUL_PIN, STEP_IDLE);
   digitalWrite(J1_DIR_PIN, LOW);
   digitalWrite(J2_DIR_PIN, LOW);
+  digitalWrite(BLADE_IN1_PIN, LOW);
+  digitalWrite(BLADE_IN2_PIN, LOW);
   disableDrivers();
 
   Serial.begin(115200);
   Serial.setTimeout(50);
+  const unsigned long controlsStartedMs = millis();
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    buttons[i].rawState = digitalRead(buttons[i].pin);
+    buttons[i].stableState = buttons[i].rawState;
+    buttons[i].rawChangedMs = controlsStartedMs;
+  }
   if (USE_ENCODERS) {
     const bool j1Found = j1Encoder.begin(J1_SDA_PIN, J1_SCL_PIN);
     const bool j2Found = j2Encoder.begin(J2_SDA_PIN, J2_SCL_PIN);
@@ -874,6 +1034,7 @@ void setup() {
   Serial.println();
   Serial.println("SwivelCut Arduino controller ready");
   Serial.println("Fold the arm, then type ARM FOLDED");
+  Serial.println("Type CONTROLS to print buttons and head ID.");
   printHelp();
 }
 
@@ -889,5 +1050,6 @@ void loop() {
       inputLine += incoming;
     }
   }
+  serviceControlInputs();
   serviceEncoderStream();
 }
