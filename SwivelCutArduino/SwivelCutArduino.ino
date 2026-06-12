@@ -119,6 +119,10 @@ class AS5600Tracker {
     return true;
   }
 
+  bool rawValue(uint16_t &raw) {
+    return readRaw(raw);
+  }
+
  private:
   bool readRaw(uint16_t &raw) {
     uint8_t data[2] = {};
@@ -238,11 +242,23 @@ void serviceEncoderStream() {
     Serial.println("ENC_STREAM ERROR: read failed; stream stopped");
     return;
   }
+  uint16_t j1Raw = 0;
+  uint16_t j2Raw = 0;
+  if (!j1Encoder.rawValue(j1Raw) ||
+      (!encodersJ1Only && !j2Encoder.rawValue(j2Raw))) {
+    encoderStreamEnabled = false;
+    Serial.println("ENC_STREAM ERROR: raw read failed; stream stopped");
+    return;
+  }
   Serial.print("ENC_STREAM J1=");
   Serial.print(j1Deg, 2);
+  Serial.print(" RAW1=");
+  Serial.print(j1Raw);
   if (!j1OnlyMode) {
     Serial.print(" J2=");
     Serial.print(j2Deg, 2);
+    Serial.print(" RAW2=");
+    Serial.print(j2Raw);
   }
   Serial.println();
 }
