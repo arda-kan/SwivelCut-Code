@@ -119,12 +119,23 @@ TRACING_STOPPED
 CUTTING_STARTED
 CUTTING_STARTED_WITH_STABILIZATION
 CUTTING_STOPPED
+STABILIZATION_ON
+STABILIZATION_OFF
+REPEATING_LAST_CUT_EVENT
+REPEATING_LAST_CUT_EVENT_WITH_STABILIZATION
 ```
 
 This mode also keeps the motors and blade outputs disabled. Button 1 starts or
-stops the simulated state. Button 2 toggles stabilization; while simulated
-cutting is active, it updates the cutting state text. Use `STATE TEST OFF` to
-exit.
+stops the simulated state. Button 2 toggles a persistent stabilization setting
+only while idle. Pressing it during an active trace or cut prints
+`STABILIZATION_CHANGE_IGNORED_ACTIVE_EVENT` and does not alter the setting.
+Once enabled, stabilization applies to every later simulated cut and repeat
+until Button 2 turns it off while idle.
+
+Button 3 prints `REPEATING_LAST_CUT_EVENT` after at least one simulated cut has
+been started and stopped. If persistent stabilization is enabled, it prints
+`REPEATING_LAST_CUT_EVENT_WITH_STABILIZATION`. Repeat does nothing during an
+active event or before a completed cut exists. Use `STATE TEST OFF` to exit.
 
 Positive joint angles are counterclockwise when viewed from above the cutting
 plane. J1 uses the normal driver direction and J2 is inverted to match the

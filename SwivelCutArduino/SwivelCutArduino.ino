@@ -250,6 +250,7 @@ bool stateTestEnabled = false;
 unsigned long nextControlTestReportMs = 0;
 bool testTeachingActive = false;
 bool testStabilizationEnabled = false;
+bool testHasLastCut = false;
 HeadType testActiveHead = HeadType::UNKNOWN;
 
 float currentJ1Deg() { return j1PositionSteps / J1_STEPS_PER_DEG; }
@@ -319,6 +320,9 @@ void printStateTestEvent(const ButtonInput &button) {
           testActiveHead == HeadType::TRACING
               ? "TRACING_STOPPED"
               : "CUTTING_STOPPED");
+      if (testActiveHead == HeadType::CUTTING) {
+        testHasLastCut = true;
+      }
       testTeachingActive = false;
       testActiveHead = HeadType::UNKNOWN;
       return;
@@ -341,12 +345,22 @@ void printStateTestEvent(const ButtonInput &button) {
       Serial.println("CUTTING_STARTED");
     }
   } else if (button.number == 2) {
+    if (testTeachingActive) {
+      Serial.println("STABILIZATION_CHANGE_IGNORED_ACTIVE_EVENT");
+      return;
+    }
     testStabilizationEnabled = !testStabilizationEnabled;
-    if (testTeachingActive && testActiveHead == HeadType::CUTTING) {
-      Serial.println(
-          testStabilizationEnabled
-              ? "CUTTING_STARTED_WITH_STABILIZATION"
-              : "CUTTING_STARTED");
+    Serial.println(
+        testStabilizationEnabled
+            ? "STABILIZATION_ON"
+            : "STABILIZATION_OFF");
+  } else if (button.number == 3) {
+    if (testTeachingActive || !testHasLastCut) {
+      Serial.println("NOT_DOING_ANYTHING");
+    } else if (testStabilizationEnabled) {
+      Serial.println("REPEATING_LAST_CUT_EVENT_WITH_STABILIZATION");
+    } else {
+      Serial.println("REPEATING_LAST_CUT_EVENT");
     }
   }
 }
@@ -472,6 +486,7 @@ void setStateTest(bool enabled) {
   headTypeInitialized = false;
   testTeachingActive = false;
   testStabilizationEnabled = false;
+  testHasLastCut = false;
   testActiveHead = HeadType::UNKNOWN;
   nextHeadSampleMs = 0;
   Serial.println("NOT_DOING_ANYTHING");
