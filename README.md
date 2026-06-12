@@ -98,6 +98,16 @@ line every 500 ms so wiring can be checked even when no state change is
 detected. Use `CONTROL TEST OFF` to leave the tester. `CONTROLS` prints one
 immediate snapshot without entering test mode.
 
+In test mode, presses print their intended future action but do not execute it:
+
+- Button 1 alternates `STARTING TEACHING REQUESTED` and
+  `STOPPING TEACHING REQUESTED`.
+- Button 2 alternates `STABILIZATION ON REQUESTED` and
+  `STABILIZATION OFF REQUESTED`.
+- Button 3 prints `REPEAT REQUESTED`.
+
+Every action line is marked `TEST ONLY` and `NO FUNCTION STARTED`.
+
 Positive joint angles are counterclockwise when viewed from above the cutting
 plane. J1 uses the normal driver direction and J2 is inverted to match the
 installed motor and belt direction. This changes only the electrical direction

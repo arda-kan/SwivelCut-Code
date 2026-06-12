@@ -247,6 +247,8 @@ bool headTypeInitialized = false;
 unsigned long nextHeadSampleMs = 0;
 bool controlTestEnabled = false;
 unsigned long nextControlTestReportMs = 0;
+bool testTeachingActive = false;
+bool testStabilizationEnabled = false;
 
 float currentJ1Deg() { return j1PositionSteps / J1_STEPS_PER_DEG; }
 float currentJ2Deg() { return j2PositionSteps / J2_STEPS_PER_DEG; }
@@ -286,6 +288,24 @@ void printButtonEvent(const ButtonInput &button) {
   Serial.print(" (GPIO");
   Serial.print(button.pin);
   Serial.println(")");
+  if (button.stableState != LOW) return;
+
+  Serial.print("TEST ONLY - ");
+  if (button.number == 1) {
+    testTeachingActive = !testTeachingActive;
+    Serial.println(
+        testTeachingActive
+            ? "STARTING TEACHING REQUESTED; NO FUNCTION STARTED"
+            : "STOPPING TEACHING REQUESTED; NO FUNCTION STARTED");
+  } else if (button.number == 2) {
+    testStabilizationEnabled = !testStabilizationEnabled;
+    Serial.println(
+        testStabilizationEnabled
+            ? "STABILIZATION ON REQUESTED; NO FUNCTION STARTED"
+            : "STABILIZATION OFF REQUESTED; NO FUNCTION STARTED");
+  } else if (button.number == 3) {
+    Serial.println("REPEAT REQUESTED; NO FUNCTION STARTED");
+  }
 }
 
 void printControlStatus() {
@@ -375,6 +395,8 @@ void setControlTest(bool enabled) {
   }
   candidateHeadSamples = 0;
   headTypeInitialized = false;
+  testTeachingActive = false;
+  testStabilizationEnabled = false;
   nextHeadSampleMs = 0;
   nextControlTestReportMs = now;
   Serial.println(
