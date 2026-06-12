@@ -6,14 +6,14 @@ Controller and motion visualizer for the two-joint SwivelCut cardboard cutter.
 
 The primary ESP32 firmware is now
 `SwivelCutArduino/SwivelCutArduino.ino`. Open that file in Arduino IDE, select
-an ESP32 board, and upload it at 115200 baud. The older MicroPython files remain
-in the branch as migration reference.
+an ESP32 board, and upload it. Use `115200` baud for Serial Monitor. The older
+MicroPython files remain in the branch as migration reference.
 
 The Arduino sketch drives each TB6600 directly with the proven DFRobot-style
 waveform: STEP is HIGH for 1500 microseconds and LOW for 1500 microseconds.
 GPIO 25/26/27 are J1 pulse, direction, and enable; GPIO 32/33 are J2 pulse and
-direction. Start with the blade removed, fold the arm, send `ARM FOLDED`, then
-use `TEST J1 800` or `TEST J2 800` for a controlled base motor test.
+direction. Start with the blade removed and fold the arm before switching on or
+resetting the ESP32. For bench testing, use `TEST J1 800` or `TEST J2 800`.
 
 ## Fixed machine
 
@@ -118,10 +118,11 @@ power; some boards arrange the header pins differently.
 
 ## Product buttons and attachment detection
 
-`main.py` starts the physical product controller. The on/off control is a
-hardware latching power switch and is not connected to an ESP32 input. Use a
-switch, contactor, or power module rated for the actual motor-supply current;
-the physical power disconnect remains the primary emergency stop.
+The product controller is implemented directly in
+`SwivelCutArduino/SwivelCutArduino.ino`. The on/off control is a hardware
+latching power switch and is not connected to an ESP32 input. Use a switch,
+contactor, or power module rated for the actual motor-supply current; the
+physical power disconnect remains the primary emergency stop.
 
 The three momentary logic buttons connect between these pins and ground. The
 firmware enables each ESP32 input's internal pull-up.
@@ -143,10 +144,13 @@ and ground through the pogo pins:
 
 This produces approximately half-scale ADC for the tracing head, approximately
 18% scale for the cutting head, and full scale when disconnected. GPIO 34 has
-no internal pull-up. The ranges in `product_controller.py` intentionally leave
+no internal pull-up. The ranges in `SwivelCutArduino.ino` intentionally leave
 gaps so a loose, damaged, or unknown attachment cannot be treated as a cutting
-head. Check actual `read_u16()` values on the assembled unit and adjust the
-ranges if resistor tolerance, wiring, or the ESP32 ADC shifts them.
+head. The Arduino sketch uses 12-bit `analogRead()` values from 0 to 4095.
+Check the assembled values and adjust `TRACING_ADC_*`, `CUTTING_ADC_*`, and
+`DISCONNECTED_ADC_MIN` if resistor tolerance, wiring, or the ESP32 ADC shifts
+them. Type `HEAD` in Serial Monitor to print the detected head and raw ADC
+reading.
 
 The blade actuator uses an H-bridge:
 
@@ -200,12 +204,12 @@ branch assumes motor-shaft mounting and divides measured motor rotation by the
 
 ## Files
 
+- `SwivelCutArduino/SwivelCutArduino.ino`: primary Arduino IDE firmware,
+  including buttons, head ID, blade actuation, teaching, smoothing, and replay.
 - `as5600.py`: AS5600 register access and wrap-safe multi-turn tracking.
 - `encoder_test.py`: standalone wiring, angle, and magnet diagnostic.
-- `swivelcut.py`: MicroPython controller for an ESP32 and two stepper axes.
-- `product_controller.py`: buttons, head ID, blade actuator, and product state.
-- `serial_console.py`: guarded USB serial command parser.
-- `main.py`: starts the physical product controls when the ESP32 boots.
+- `swivelcut.py`, `product_controller.py`, `serial_console.py`, and `main.py`:
+  older MicroPython implementation retained as a reference.
 - `swivelcut_visualizer.html`: browser visualizer for geometry, IK, and motion.
 
 ## Running it on the ESP32
@@ -228,116 +232,32 @@ emergency power switch.
 
 ### Test the encoders before motor operation
 
-Keep the TB6600 motor supply switched off. From the repository directory, run:
+Keep the blade removed and motor power off for the first test. Upload the
+Arduino sketch with the arm folded and open Serial Monitor at `115200` baud.
+The sketch reports a warning if either AS5600 address is missing and reports an
+error if either magnet check fails.
 
-```sh
-python3 -m mpremote connect auto run encoder_test.py
-```
+After successful folded calibration, type `ENC`, move one shaft a very small
+amount by hand, and type `ENC` again. The matching joint angle must change
+smoothly in the expected direction while the other remains steady. If an
+encoder is missing, disconnect power and check its 3.3 V, ground, SDA, SCL,
+magnet centering, and sensor gap before continuing.
 
-The expected startup output contains address `0x36` on both buses:
+### 2. Install and configure Arduino IDE
 
-```text
-J1 bus: SDA=GPIO16 SCL=GPIO17 devices=['0x36']
-J2 bus: SDA=GPIO21 SCL=GPIO22 devices=['0x36']
-Both encoders found. Press Ctrl-C to stop.
-```
+1. Install Arduino IDE 2.x.
+2. Add Espressif's ESP32 board package through Boards Manager.
+3. Open `SwivelCutArduino/SwivelCutArduino.ino`.
+4. Select the matching ESP32 board and USB port.
+5. Compile and upload the sketch.
+6. Open Serial Monitor at `115200` baud for status and bench commands.
 
-Slowly rotate each motor shaft by hand. Its `raw` value and angle should change
-smoothly while the other encoder remains steady. The angle wraps between about
-359.9 and 0 degrees once per motor-shaft revolution.
-
-The magnet result should be `OK`:
-
-- `NOT DETECTED`: magnet absent, too far away, badly off-center, or incorrect
-  magnet type.
-- `TOO WEAK`: reduce the sensor-to-magnet gap or improve centering.
-- `TOO STRONG`: increase the sensor-to-magnet gap.
-
-If one bus does not list `0x36`, switch power off and check VCC, GND, SDA, and
-SCL for that module. Do not move wiring while it is powered. Stop the test with
-`Ctrl-C`.
-
-For `devices=[]`, use this order:
-
-1. Disconnect USB and motor power.
-2. Remove J2 completely and test only J1.
-3. Check continuity from the ESP32 pin itself to the sensor header; do not rely
-   only on breadboard row alignment.
-4. Confirm the sensor receives about 3.3 V between its VCC and GND pins.
-5. Confirm SDA and SCL are not swapped and neither is shorted to GND or 3.3 V.
-6. Try the other AS5600 module on the same J1 wires. If the second module works,
-   the first module or its solder joints are faulty.
-
-Do not connect external pull-up resistors until the module has been inspected.
-Most AS5600 breakout boards already include I2C pull-ups.
-
-### 2. Install the computer tools
-
-On macOS Terminal:
-
-```sh
-python3 -m pip install --user esptool mpremote
-```
-
-Download the stable generic ESP32/WROOM MicroPython `.bin` firmware from:
-
-https://micropython.org/download/ESP32_GENERIC/
-
-### 3. Connect and identify the ESP32
-
-Connect the ESP32 over a data-capable USB cable:
-
-```sh
-python3 -m mpremote connect list
-```
-
-The following commands use automatic port detection. If several serial devices
-are connected, replace `connect auto` with the device shown by the list command.
-
-### 4. Flash MicroPython
-
-Put the ESP32 into bootloader mode if required by holding `BOOT`, pressing and
-releasing `RESET`, then releasing `BOOT`.
-
-Replace `firmware.bin` with the downloaded file path:
-
-```sh
-python3 -m esptool erase-flash
-python3 -m esptool --chip esp32 write-flash 0x1000 firmware.bin
-```
-
-### 5. Upload the arm program
-
-Run this from the repository directory:
-
-```sh
-python3 -m mpremote connect auto fs cp swivelcut.py :swivelcut.py
-python3 -m mpremote connect auto fs cp as5600.py :as5600.py
-python3 -m mpremote connect auto fs cp product_controller.py :product_controller.py
-python3 -m mpremote connect auto fs cp serial_console.py :serial_console.py
-python3 -m mpremote connect auto fs cp main.py :main.py
-python3 -m mpremote connect auto reset
-```
-
-MicroPython automatically executes `main.py` after boot.
-
-### 6. Open the status terminal
-
-```sh
-python3 -m mpremote connect auto repl
-```
-
-The product controller prints head, teaching, stabilization, cutting, stop, and
-error status. Exit the terminal later with `Ctrl-]` or `Ctrl-X`.
-
-### 7. Confirm startup and test slowly
+### 3. Confirm startup and test slowly
 
 Physically place the arm in the fully folded pose before every reset or
-power-on. The product controller checks both magnets and calibrates that pose
-automatically. It leaves the arm drivers disabled until a cut starts.
-
-For bench testing through the command console instead, temporarily change
-`main.py` to import and call `run_console()` from `serial_console.py`.
+power-on. The Arduino product controller checks both magnets and calibrates
+that pose automatically. It leaves the arm drivers disabled until a cut starts.
+The Serial Monitor remains available for diagnostics and manual bench commands.
 
 Before powered movement, verify encoder directions with the blade removed:
 
@@ -364,9 +284,9 @@ J2 180
 
 If a positive command turns a joint clockwise rather than counterclockwise,
 disconnect motor power and change that joint's `INVERT_J1` or `INVERT_J2`
-setting in `swivelcut.py`, upload the file again, and reset.
+setting in `SwivelCutArduino.ino`, upload the sketch again, and reset.
 
-### 8. Normal commands
+### 4. Normal commands
 
 For continuous encoder output, calibrate first and opt in:
 
