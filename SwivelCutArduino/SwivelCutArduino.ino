@@ -246,9 +246,11 @@ int latestHeadAdc = 0;
 bool headTypeInitialized = false;
 unsigned long nextHeadSampleMs = 0;
 bool controlTestEnabled = false;
+bool stateTestEnabled = false;
 unsigned long nextControlTestReportMs = 0;
 bool testTeachingActive = false;
 bool testStabilizationEnabled = false;
+HeadType testActiveHead = HeadType::UNKNOWN;
 
 float currentJ1Deg() { return j1PositionSteps / J1_STEPS_PER_DEG; }
 float currentJ2Deg() { return j2PositionSteps / J2_STEPS_PER_DEG; }
@@ -308,6 +310,47 @@ void printButtonEvent(const ButtonInput &button) {
   }
 }
 
+void printStateTestEvent(const ButtonInput &button) {
+  if (button.stableState != LOW) return;
+
+  if (button.number == 1) {
+    if (testTeachingActive) {
+      Serial.println(
+          testActiveHead == HeadType::TRACING
+              ? "TRACING_STOPPED"
+              : "CUTTING_STOPPED");
+      testTeachingActive = false;
+      testActiveHead = HeadType::UNKNOWN;
+      return;
+    }
+
+    if (!headTypeInitialized ||
+        (stableHeadType != HeadType::CUTTING &&
+         stableHeadType != HeadType::TRACING)) {
+      Serial.println("NOT_DOING_ANYTHING");
+      return;
+    }
+
+    testTeachingActive = true;
+    testActiveHead = stableHeadType;
+    if (testActiveHead == HeadType::TRACING) {
+      Serial.println("TRACING_STARTED");
+    } else if (testStabilizationEnabled) {
+      Serial.println("CUTTING_STARTED_WITH_STABILIZATION");
+    } else {
+      Serial.println("CUTTING_STARTED");
+    }
+  } else if (button.number == 2) {
+    testStabilizationEnabled = !testStabilizationEnabled;
+    if (testTeachingActive && testActiveHead == HeadType::CUTTING) {
+      Serial.println(
+          testStabilizationEnabled
+              ? "CUTTING_STARTED_WITH_STABILIZATION"
+              : "CUTTING_STARTED");
+    }
+  }
+}
+
 void printControlStatus() {
   Serial.print("CONTROLS");
   for (size_t i = 0; i < BUTTON_COUNT; ++i) {
@@ -341,6 +384,7 @@ void serviceControlInputs() {
         now - button.rawChangedMs >= BUTTON_DEBOUNCE_MS) {
       button.stableState = raw;
       if (controlTestEnabled) printButtonEvent(button);
+      if (stateTestEnabled) printStateTestEvent(button);
     }
   }
 
@@ -378,6 +422,7 @@ void serviceControlInputs() {
 
 void setControlTest(bool enabled) {
   controlTestEnabled = enabled;
+  stateTestEnabled = false;
   if (!enabled) {
     Serial.println("CONTROL TEST OFF");
     return;
@@ -403,6 +448,33 @@ void setControlTest(bool enabled) {
       "CONTROL TEST ON: motors and blade outputs disabled; "
       "press buttons or change head");
   printControlStatus();
+}
+
+void setStateTest(bool enabled) {
+  stateTestEnabled = enabled;
+  controlTestEnabled = false;
+  if (!enabled) {
+    Serial.println("STATE_TEST_OFF");
+    return;
+  }
+
+  disableDrivers();
+  digitalWrite(BLADE_IN1_PIN, LOW);
+  digitalWrite(BLADE_IN2_PIN, LOW);
+  encoderStreamEnabled = false;
+  const unsigned long now = millis();
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    buttons[i].rawState = digitalRead(buttons[i].pin);
+    buttons[i].stableState = buttons[i].rawState;
+    buttons[i].rawChangedMs = now;
+  }
+  candidateHeadSamples = 0;
+  headTypeInitialized = false;
+  testTeachingActive = false;
+  testStabilizationEnabled = false;
+  testActiveHead = HeadType::UNKNOWN;
+  nextHeadSampleMs = 0;
+  Serial.println("NOT_DOING_ANYTHING");
 }
 
 void enableDrivers() {
@@ -853,7 +925,7 @@ void printHelp() {
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
   Serial.println("  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>");
   Serial.println("  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS");
-  Serial.println("  CONTROLS | CONTROL TEST ON | CONTROL TEST OFF");
+  Serial.println("  CONTROLS | CONTROL TEST ON/OFF | STATE TEST ON/OFF");
   Serial.println("  PLAY | CLEAR | POS | HELP");
 }
 
@@ -897,15 +969,17 @@ void handleCommand(String command) {
 
   if (command == "CONTROL TEST ON") return setControlTest(true);
   if (command == "CONTROL TEST OFF") return setControlTest(false);
+  if (command == "STATE TEST ON") return setStateTest(true);
+  if (command == "STATE TEST OFF") return setStateTest(false);
   if (command == "CONTROL TEST STATUS") {
     Serial.println(controlTestEnabled ? "CONTROL TEST ON" : "CONTROL TEST OFF");
     return;
   }
   if (command == "CONTROLS") return printControlStatus();
   if (command == "HELP") return printHelp();
-  if (controlTestEnabled) {
+  if (controlTestEnabled || stateTestEnabled) {
     Serial.println(
-        "ERROR: CONTROL TEST is active; use CONTROL TEST OFF first");
+        "ERROR: input test is active; turn the test OFF first");
     return;
   }
 

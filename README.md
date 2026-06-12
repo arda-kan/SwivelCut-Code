@@ -108,6 +108,24 @@ In test mode, presses print their intended future action but do not execute it:
 
 Every action line is marked `TEST ONLY` and `NO FUNCTION STARTED`.
 
+Use `STATE TEST ON` for a quieter combined-state test. It prints only one state
+event at a time based on the stable head ID, Start/Stop button, and
+stabilization toggle:
+
+```text
+NOT_DOING_ANYTHING
+TRACING_STARTED
+TRACING_STOPPED
+CUTTING_STARTED
+CUTTING_STARTED_WITH_STABILIZATION
+CUTTING_STOPPED
+```
+
+This mode also keeps the motors and blade outputs disabled. Button 1 starts or
+stops the simulated state. Button 2 toggles stabilization; while simulated
+cutting is active, it updates the cutting state text. Use `STATE TEST OFF` to
+exit.
+
 Positive joint angles are counterclockwise when viewed from above the cutting
 plane. J1 uses the normal driver direction and J2 is inverted to match the
 installed motor and belt direction. This changes only the electrical direction
@@ -371,6 +389,8 @@ above.
 | `CONTROLS` | Prints all three debounced button states, the hardware-only power switch note, and the stable head ID with its ADC reading. | Button and stable head changes are also printed automatically. |
 | `CONTROL TEST ON` | Starts the input-only button and head-ID tester. | Disables motors and blade outputs; reports changes and a status line every 500 ms. |
 | `CONTROL TEST OFF` | Stops the input tester. | Does not arm or move anything. |
+| `STATE TEST ON` | Starts the single-line combined head/button state tester. | Motors and blade outputs remain disabled. |
+| `STATE TEST OFF` | Stops the combined state tester. | Does not arm or move anything. |
 | `POS` | Prints the controller's current `X`, `Y`, `J1`, and `J2` state. | This is software state. It is not refreshed by arbitrary hand movement while disarmed. |
 | `J1 <deg>` | Moves J1 to an absolute shoulder angle while holding J2. | Allowed range is `-90` to `+90` degrees. |
 | `J2 <deg>` | Moves J2 to an absolute elbow angle while holding J1. | Allowed range is `-180` to `+180` degrees. |
