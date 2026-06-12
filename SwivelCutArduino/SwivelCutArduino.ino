@@ -3,8 +3,8 @@
 #include <math.h>
 
 // SwivelCut firmware for an ESP32 and two TB6600 stepper drivers.
-// The pulse waveform follows the supplied DFRobot example:
-// STEP HIGH for 1500 us, then STEP LOW for 1500 us.
+// Common-anode STEP waveform: active LOW for 1500 us, then idle HIGH for
+// 1500 us.
 
 constexpr int J1_PUL_PIN = 25;
 constexpr int J1_DIR_PIN = 26;
@@ -49,9 +49,11 @@ constexpr float J2_MAX_DEG = 180.0f;
 constexpr bool INVERT_J1 = false;
 constexpr bool INVERT_J2 = true;
 
-// Change these three levels only if the driver's input wiring is changed.
-constexpr uint8_t STEP_ACTIVE = HIGH;
-constexpr uint8_t STEP_IDLE = LOW;
+// Verified common-anode wiring: PUL+, DIR+, and ENA+ connect to 3.3 V, while
+// the ESP32 drives PUL-, DIR-, and ENA-. STEP activates LOW and idles HIGH.
+// On the tested TB6600, ENA- LOW disables the outputs, so HIGH enables them.
+constexpr uint8_t STEP_ACTIVE = LOW;
+constexpr uint8_t STEP_IDLE = HIGH;
 constexpr uint8_t OUTPUTS_ENABLED = HIGH;
 constexpr uint8_t OUTPUTS_DISABLED = LOW;
 constexpr unsigned long STEP_HALF_PERIOD_US = 1500;
@@ -551,7 +553,12 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
       j2PositionSteps = lroundf(measuredJ2 * J2_STEPS_PER_DEG);
     }
   }
-  if (report) Serial.println("OK");
+  if (report) {
+    Serial.println(
+        encoderFeedbackEnabled
+            ? "OK: encoder verified target"
+            : "PULSES SENT: feedback off; physical movement not verified");
+  }
   return true;
 }
 
@@ -1136,11 +1143,19 @@ void handleCommand(String command) {
     if (!armed) {
       Serial.println("ERROR: type ARM FOLDED first");
     } else if (strcmp(axis, "J1") == 0) {
-      executeSteps(rawSteps, 0);
-      Serial.println("OK");
+      if (executeSteps(rawSteps, 0)) {
+        Serial.println(
+            encoderFeedbackEnabled
+                ? "OK: encoder accepted J1 test"
+                : "PULSES SENT: feedback off; physical movement not verified");
+      }
     } else if (strcmp(axis, "J2") == 0 && !j1OnlyMode) {
-      executeSteps(0, rawSteps);
-      Serial.println("OK");
+      if (executeSteps(0, rawSteps)) {
+        Serial.println(
+            encoderFeedbackEnabled
+                ? "OK: encoder accepted J2 test"
+                : "PULSES SENT: feedback off; physical movement not verified");
+      }
     } else {
       Serial.println("ERROR: invalid or blocked test axis");
     }

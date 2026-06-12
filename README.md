@@ -72,12 +72,10 @@ signal; the reported joint angles and Cartesian calculations stay unchanged.
 Coordinates use positive `X = physical right` and positive `Y = forward`.
 With both links straight, `J1=0`, `J2=0` is `(X=0, Y=400)`.
 
-The Arduino sketch defaults to the same signal levels as the supplied DFRobot
-test: STEP pulses HIGH, idles LOW, and GPIO 27 HIGH enables the outputs. Wire
-the TB6600 input side to match that common-cathode signal convention. If the
-existing electronics are wired common-anode, change `STEP_ACTIVE`,
-`STEP_IDLE`, `OUTPUTS_ENABLED`, and `OUTPUTS_DISABLED` at the top of the sketch
-before applying motor power.
+The Arduino sketch uses the hardware-verified common-anode wiring: connect
+`PUL+`, `DIR+`, and `ENA+` to `3V3`, and connect the matching minus terminals
+to the ESP32 GPIO pins. STEP idles HIGH and pulses LOW. On the tested TB6600,
+GPIO 27 HIGH enables the outputs and LOW disables them.
 
 ## ESP32 to AS5600 wiring
 
