@@ -14,7 +14,7 @@ constexpr int ENA_PIN = 27;
 constexpr int BLADE_IN1_PIN = 13;
 constexpr int BLADE_IN2_PIN = 14;
 
-constexpr int START_STOP_BUTTON_PIN = 21;
+constexpr int START_STOP_BUTTON_PIN = 5;
 constexpr int STABILIZATION_BUTTON_PIN = 22;
 constexpr int REPEAT_BUTTON_PIN = 23;
 constexpr int HEAD_ID_PIN = 34;

@@ -65,12 +65,12 @@ feedback errors during powered movement still disable the driver.
 - GPIO 27: shared enable
 - GPIO 13/14: blade H-bridge inputs
 - GPIO 18/19: I2C bus 1 for the J2 AS5600 encoder
-- GPIO 21: Start/Stop button, normally open to GND
+- GPIO 5: Start/Stop button, normally open to GND
 - GPIO 22: Stabilization button, normally open to GND
 - GPIO 23: Repeat button, normally open to GND
 - GPIO 34: head-ID voltage-divider ADC input
 
-GPIO21, GPIO22, and GPIO23 use the ESP32 internal pull-ups. A pressed button
+GPIO5, GPIO22, and GPIO23 use the ESP32 internal pull-ups. A pressed button
 reads LOW and a released button reads HIGH. The firmware debounces each input
 for 35 ms and prints named `PRESSED` and `RELEASED` events. The latching power
 switch cuts hardware power directly and is not connected to a GPIO.
