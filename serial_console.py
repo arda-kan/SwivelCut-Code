@@ -7,6 +7,7 @@ from swivelcut import SwivelCut
 HELP = """Commands:
   ARM FOLDED          confirm the physical folded pose and enable the drivers
   ARM J1              test only J1 with its encoder; all J2 motion is blocked
+  ARM J2              home J2 at 180 degrees; all J1 motion is blocked
   DISARM              disable both motor drivers
   ENC                 print encoder magnet health and measured joint angles
   J1 <deg>            move shoulder to an absolute angle
@@ -44,14 +45,14 @@ class SwivelCutConsole:
     def _require_armed(self, joint=None, allow_j1_teach=False):
         if not self.armed:
             raise ValueError("arm is disabled; place it folded and type ARM FOLDED")
-        if (
-            self.arm_mode == "j1"
-            and joint != 1
-            and not allow_j1_teach
-        ):
+        if self.arm_mode == "j1" and joint != 1 and not allow_j1_teach:
             raise ValueError(
                 "ARM J1 mode permits only J1 <deg> and TEACH J1; "
                 "use DISARM to stop"
+            )
+        if self.arm_mode == "j2" and joint != 2:
+            raise ValueError(
+                "ARM J2 mode permits only J2 <deg>; use DISARM to stop"
             )
 
     @staticmethod
@@ -70,8 +71,10 @@ class SwivelCutConsole:
         if command == "HELP":
             self.output(HELP)
         elif command == "ARM":
-            if len(parts) != 2 or parts[1].upper() not in ("FOLDED", "J1"):
-                raise ValueError("use ARM FOLDED or ARM J1 after folding the arm")
+            if len(parts) != 2 or parts[1].upper() not in ("FOLDED", "J1", "J2"):
+                raise ValueError(
+                    "use ARM FOLDED, ARM J1, or ARM J2 after folding the arm"
+                )
             self.arm.disable()
             self.arm.set_folded_start()
             if parts[1].upper() == "J1":
@@ -81,6 +84,13 @@ class SwivelCutConsole:
                     "only J1 motion is allowed"
                 )
                 self.arm_mode = "j1"
+            elif parts[1].upper() == "J2":
+                self.arm.calibrate_j2_encoder()
+                message = (
+                    "ARMED J2 TEST: J2 encoder calibrated at 180.0; "
+                    "only J2 motion is allowed"
+                )
+                self.arm_mode = "j2"
             else:
                 self.arm.calibrate_encoders()
                 message = (
@@ -104,7 +114,7 @@ class SwivelCutConsole:
             except EncoderError:
                 angles = " angles=uncalibrated"
             self.output(
-                "ENC J1={} J2={}{}".format(j1_state, j2_state, angles)
+                "ENC J1=[{}] J2=[{}]{}".format(j1_state, j2_state, angles)
             )
         elif command == "J1":
             self._require_armed(joint=1)

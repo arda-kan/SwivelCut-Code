@@ -68,14 +68,30 @@ class AS5600Tracker {
 
   bool begin(int sda, int scl) {
     wire_.begin(sda, scl, 400000);
+    return probe();
+  }
+
+  bool probe() {
     wire_.beginTransmission(AS5600_ADDRESS);
     return wire_.endTransmission() == 0;
   }
 
-  bool magnetOk() {
+  const char *magnetState(bool &found) {
     uint8_t status = 0;
-    return readRegister(0x0B, &status, 1) && (status & 0x20) &&
-           !(status & 0x18);
+    if (!readRegister(0x0B, &status, 1)) {
+      found = false;
+      return "UNREADABLE";
+    }
+    found = true;
+    if (status & 0x08) return "TOO STRONG";
+    if (status & 0x10) return "TOO WEAK";
+    if (status & 0x20) return "OK";
+    return "MISSING";
+  }
+
+  bool magnetOk() {
+    bool found = false;
+    return strcmp(magnetState(found), "OK") == 0;
   }
 
   bool calibrate() {
@@ -172,10 +188,11 @@ long j2PositionSteps = lroundf(180.0f * J2_STEPS_PER_DEG);
 int taughtCount = 0;
 bool taughtJ1Only = false;
 bool armed = false;
-bool j1OnlyMode = false;
+enum class AxisMode { DUAL, J1_ONLY, J2_ONLY };
+AxisMode armMode = AxisMode::DUAL;
 bool encoderFault = false;
 bool encodersCalibrated = false;
-bool encodersJ1Only = false;
+AxisMode encoderMode = AxisMode::DUAL;
 bool encoderFeedbackEnabled = true;
 bool encoderStreamEnabled = false;
 float encoderStreamHz = 10.0f;
@@ -220,10 +237,14 @@ void pulseSelectedAxes(bool stepJ1, bool stepJ2) {
 }
 
 bool encoderJointAngles(float &j1Deg, float &j2Deg) {
-  float motor1Deg = 0.0f;
-  if (!j1Encoder.angleDegrees(motor1Deg)) return false;
-  j1Deg = motor1Deg / J1_GEAR_RATIO;
-  if (encodersJ1Only) {
+  if (encoderMode == AxisMode::J2_ONLY) {
+    j1Deg = currentJ1Deg();
+  } else {
+    float motor1Deg = 0.0f;
+    if (!j1Encoder.angleDegrees(motor1Deg)) return false;
+    j1Deg = motor1Deg / J1_GEAR_RATIO;
+  }
+  if (encoderMode == AxisMode::J1_ONLY) {
     j2Deg = currentJ2Deg();
     return true;
   }
@@ -249,17 +270,20 @@ void serviceEncoderStream() {
   }
   int16_t j1Raw = 0;
   int16_t j2Raw = 0;
-  if (!j1Encoder.rawValue(j1Raw) ||
-      (!encodersJ1Only && !j2Encoder.rawValue(j2Raw))) {
+  if ((encoderMode != AxisMode::J2_ONLY && !j1Encoder.rawValue(j1Raw)) ||
+      (encoderMode != AxisMode::J1_ONLY && !j2Encoder.rawValue(j2Raw))) {
     encoderStreamEnabled = false;
     Serial.println("ENC_STREAM ERROR: raw read failed; stream stopped");
     return;
   }
-  Serial.print("ENC_STREAM J1=");
-  Serial.print(j1Deg, 2);
-  Serial.print(" RAW1=");
-  Serial.print(j1Raw);
-  if (!j1OnlyMode) {
+  Serial.print("ENC_STREAM");
+  if (encoderMode != AxisMode::J2_ONLY) {
+    Serial.print(" J1=");
+    Serial.print(j1Deg, 2);
+    Serial.print(" RAW1=");
+    Serial.print(j1Raw);
+  }
+  if (encoderMode != AxisMode::J1_ONLY) {
     Serial.print(" J2=");
     Serial.print(j2Deg, 2);
     Serial.print(" RAW2=");
@@ -278,17 +302,22 @@ bool checkFeedback() {
   }
   const float errorJ1 = measuredJ1 - currentJ1Deg();
   const float errorJ2 = measuredJ2 - currentJ2Deg();
-  if (fabsf(errorJ1) > FEEDBACK_MAX_ERROR_DEG ||
-      (!j1OnlyMode && fabsf(errorJ2) > FEEDBACK_MAX_ERROR_DEG)) {
+  if ((armMode != AxisMode::J2_ONLY &&
+       fabsf(errorJ1) > FEEDBACK_MAX_ERROR_DEG) ||
+      (armMode != AxisMode::J1_ONLY &&
+       fabsf(errorJ2) > FEEDBACK_MAX_ERROR_DEG)) {
     disableDrivers();
     encoderFault = true;
-    Serial.print("FEEDBACK FAULT: expected J1=");
-    Serial.print(currentJ1Deg(), 2);
-    Serial.print(" measured J1=");
-    Serial.print(measuredJ1, 2);
-    Serial.print(" error=");
-    Serial.print(errorJ1, 2);
-    if (!j1OnlyMode) {
+    Serial.print("FEEDBACK FAULT:");
+    if (armMode != AxisMode::J2_ONLY) {
+      Serial.print(" expected J1=");
+      Serial.print(currentJ1Deg(), 2);
+      Serial.print(" measured J1=");
+      Serial.print(measuredJ1, 2);
+      Serial.print(" error=");
+      Serial.print(errorJ1, 2);
+    }
+    if (armMode != AxisMode::J1_ONLY) {
       Serial.print("; expected J2=");
       Serial.print(currentJ2Deg(), 2);
       Serial.print(" measured J2=");
@@ -346,8 +375,14 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
     Serial.println("ERROR: type ARM FOLDED first");
     return false;
   }
-  if (j1OnlyMode && fabsf(j2Deg - currentJ2Deg()) > 0.001f) {
+  if (armMode == AxisMode::J1_ONLY &&
+      fabsf(j2Deg - currentJ2Deg()) > 0.001f) {
     Serial.println("ERROR: ARM J1 mode blocks J2 motion");
+    return false;
+  }
+  if (armMode == AxisMode::J2_ONLY &&
+      fabsf(j1Deg - currentJ1Deg()) > 0.001f) {
+    Serial.println("ERROR: ARM J2 mode blocks J1 motion");
     return false;
   }
   if (!angleInRange(j1Deg, j2Deg)) {
@@ -370,14 +405,21 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
     }
     const float errorJ1 = j1Deg - measuredJ1;
     const float errorJ2 = j2Deg - measuredJ2;
-    if (fabsf(errorJ1) <= FEEDBACK_TOLERANCE_DEG &&
-        (j1OnlyMode || fabsf(errorJ2) <= FEEDBACK_TOLERANCE_DEG)) break;
+    const bool j1Settled =
+        armMode == AxisMode::J2_ONLY ||
+        fabsf(errorJ1) <= FEEDBACK_TOLERANCE_DEG;
+    const bool j2Settled =
+        armMode == AxisMode::J1_ONLY ||
+        fabsf(errorJ2) <= FEEDBACK_TOLERANCE_DEG;
+    if (j1Settled && j2Settled) break;
     if (correction == FEEDBACK_MAX_CORRECTIONS) {
       feedbackFault("target did not settle");
       return false;
     }
-    j1PositionSteps = lroundf(measuredJ1 * J1_STEPS_PER_DEG);
-    if (!j1OnlyMode) {
+    if (armMode != AxisMode::J2_ONLY) {
+      j1PositionSteps = lroundf(measuredJ1 * J1_STEPS_PER_DEG);
+    }
+    if (armMode != AxisMode::J1_ONLY) {
       j2PositionSteps = lroundf(measuredJ2 * J2_STEPS_PER_DEG);
     }
   }
@@ -489,6 +531,14 @@ void recordTeach(float seconds, float hz, bool j1Only,
     Serial.println("ERROR: this branch has no AS5600 teach support");
     return;
   }
+  if ((j1Only && armMode != AxisMode::J1_ONLY) ||
+      (!j1Only && armMode != AxisMode::DUAL)) {
+    Serial.println(
+        armMode == AxisMode::J2_ONLY
+            ? "ERROR: TEACH is unavailable in ARM J2 mode"
+            : "ERROR: use ARM J1 for TEACH J1 or ARM FOLDED for TEACH");
+    return;
+  }
   if (!armed || seconds <= 0.0f || seconds > 60.0f ||
       hz < 1.0f || hz > 50.0f) {
     Serial.println("ERROR: TEACH needs 0-60 seconds and 1-50 Hz");
@@ -553,7 +603,7 @@ void replayTeach() {
     Serial.println("ERROR: no taught movement");
     return;
   }
-  j1OnlyMode = taughtJ1Only;
+  armMode = taughtJ1Only ? AxisMode::J1_ONLY : AxisMode::DUAL;
   float measuredJ1 = 0.0f;
   float measuredJ2 = 0.0f;
   if (!encoderJointAngles(measuredJ1, measuredJ2)) {
@@ -590,7 +640,7 @@ bool parseElbow(const char *text) {
 
 void printHelp() {
   Serial.println("Commands:");
-  Serial.println("  ARM FOLDED | ARM J1 | DISARM");
+  Serial.println("  ARM FOLDED | ARM J1 | ARM J2 | DISARM");
   Serial.println("  TEST J1 <steps> | TEST J2 <steps>");
   Serial.println("  J1 <deg> | J2 <deg> | ANGLES <j1> <j2>");
   Serial.println("  XY <x> <y> [UP|DOWN]");
@@ -601,27 +651,37 @@ void printHelp() {
   Serial.println("  PLAY | CLEAR | POS | HELP");
 }
 
-void armAtFoldedPose(bool j1Only) {
+void armAtFoldedPose(AxisMode mode) {
   disableDrivers();
   j1PositionSteps = 0;
   j2PositionSteps = lroundf(180.0f * J2_STEPS_PER_DEG);
   encoderFault = false;
-  j1OnlyMode = j1Only;
+  armMode = mode;
   encodersCalibrated = false;
-  encodersJ1Only = j1Only;
+  encoderMode = mode;
   if (USE_ENCODERS) {
-    if (!j1Encoder.calibrate() || (!j1Only && !j2Encoder.calibrate())) {
+    const bool j1Ok =
+        mode == AxisMode::J2_ONLY || j1Encoder.calibrate();
+    const bool j2Ok =
+        mode == AxisMode::J1_ONLY || j2Encoder.calibrate();
+    if (!j1Ok || !j2Ok) {
       Serial.println("ERROR: encoder or magnet check failed");
       return;
     }
     encodersCalibrated = true;
-  } else if (j1Only) {
-    Serial.println("ERROR: ARM J1 requires an encoder branch");
+  } else if (mode != AxisMode::DUAL) {
+    Serial.println("ERROR: single-axis ARM requires an encoder branch");
     return;
   }
   enableDrivers();
   armed = true;
-  Serial.println(j1Only ? "ARMED J1 TEST" : "ARMED at J1=0, J2=180");
+  if (mode == AxisMode::J1_ONLY) {
+    Serial.println("ARMED J1 TEST: only J1 motion is allowed");
+  } else if (mode == AxisMode::J2_ONLY) {
+    Serial.println("ARMED J2 TEST: J2 homed at 180; only J2 motion is allowed");
+  } else {
+    Serial.println("ARMED at J1=0, J2=180");
+  }
 }
 
 void handleCommand(String command) {
@@ -629,11 +689,12 @@ void handleCommand(String command) {
   if (command.length() == 0) return;
   command.toUpperCase();
 
-  if (command == "ARM FOLDED") return armAtFoldedPose(false);
-  if (command == "ARM J1") return armAtFoldedPose(true);
+  if (command == "ARM FOLDED") return armAtFoldedPose(AxisMode::DUAL);
+  if (command == "ARM J1") return armAtFoldedPose(AxisMode::J1_ONLY);
+  if (command == "ARM J2") return armAtFoldedPose(AxisMode::J2_ONLY);
   if (command == "DISARM") {
     disableDrivers();
-    j1OnlyMode = false;
+    armMode = AxisMode::DUAL;
     Serial.println("DISARMED");
     return;
   }
@@ -664,7 +725,7 @@ void handleCommand(String command) {
   }
   if (command == "STREAM ON") {
     if (!encodersCalibrated) {
-      Serial.println("ERROR: type ARM FOLDED or ARM J1 before streaming");
+      Serial.println("ERROR: type ARM FOLDED, ARM J1, or ARM J2 before streaming");
     } else {
       encoderStreamEnabled = true;
       nextEncoderStreamMs = 0;
@@ -695,16 +756,34 @@ void handleCommand(String command) {
       Serial.println("ENC unavailable on this branch");
       return;
     }
-    float j1 = 0.0f;
-    float j2 = 0.0f;
-    if (encoderJointAngles(j1, j2)) {
-      Serial.print("ENC J1=");
-      Serial.print(j1, 2);
-      Serial.print(" J2=");
-      Serial.println(j2, 2);
+    bool j1Found = false;
+    bool j2Found = false;
+    const char *j1Magnet = j1Encoder.magnetState(j1Found);
+    const char *j2Magnet = j2Encoder.magnetState(j2Found);
+    Serial.print("ENC J1=[found=");
+    Serial.print(j1Found ? "YES" : "NO");
+    Serial.print(" magnet=");
+    Serial.print(j1Magnet);
+    Serial.print("] J2=[found=");
+    Serial.print(j2Found ? "YES" : "NO");
+    Serial.print(" magnet=");
+    Serial.print(j2Magnet);
+    Serial.print("]");
+    if (encodersCalibrated) {
+      float j1 = 0.0f;
+      float j2 = 0.0f;
+      if (encoderJointAngles(j1, j2)) {
+        Serial.print(" J1=");
+        Serial.print(j1, 2);
+        Serial.print(" J2=");
+        Serial.print(j2, 2);
+      } else {
+        Serial.print(" angles=READ_ERROR");
+      }
     } else {
-      Serial.println("ERROR: encoders are not calibrated");
+      Serial.print(" angles=UNCALIBRATED");
     }
+    Serial.println();
     return;
   }
 
@@ -718,7 +797,7 @@ void handleCommand(String command) {
     return static_cast<void>(moveToAngles(currentJ1Deg(), a));
   int xyFields = sscanf(command.c_str(), "XY %f %f %7s", &a, &b, option);
   if (xyFields >= 2) {
-    if (!armed || j1OnlyMode) {
+    if (!armed || armMode != AxisMode::DUAL) {
       Serial.println("ERROR: XY requires ARM FOLDED");
     } else if (moveToXY(a, b, xyFields == 3 && parseElbow(option))) {
       printPosition();
@@ -728,7 +807,7 @@ void handleCommand(String command) {
   int cutFields = sscanf(command.c_str(), "CUT %f %f %f %f %7s",
                          &a, &b, &c, &d, option);
   if (cutFields >= 4) {
-    if (!armed || j1OnlyMode) {
+    if (!armed || armMode != AxisMode::DUAL) {
       Serial.println("ERROR: CUT requires ARM FOLDED");
     } else {
       cutLine(a, b, c, d, cutFields == 5 && parseElbow(option));
@@ -741,10 +820,12 @@ void handleCommand(String command) {
   if (sscanf(command.c_str(), "TEST %2s %ld", axis, &rawSteps) == 2) {
     if (!armed) {
       Serial.println("ERROR: type ARM FOLDED first");
-    } else if (strcmp(axis, "J1") == 0) {
+    } else if (strcmp(axis, "J1") == 0 &&
+               armMode != AxisMode::J2_ONLY) {
       executeSteps(rawSteps, 0);
       Serial.println("OK");
-    } else if (strcmp(axis, "J2") == 0 && !j1OnlyMode) {
+    } else if (strcmp(axis, "J2") == 0 &&
+               armMode != AxisMode::J1_ONLY) {
       executeSteps(0, rawSteps);
       Serial.println("OK");
     } else {

@@ -272,7 +272,70 @@ class SwivelCutTests(unittest.TestCase):
         self.assertTrue(j1.calibrated)
         self.assertFalse(j2.calibrated)
         self.assertEqual(j2.updates, 0)
-        self.assertEqual(arm.encoder_status(), ("ok", "not installed"))
+        self.assertEqual(
+            arm.encoder_status(),
+            ("found magnet=ok", "found magnet=ok"),
+        )
+
+    def test_j2_only_mode_calibrates_and_never_reads_j1(self):
+        class FakeEncoder:
+            def __init__(self, value):
+                self.value = value
+                self.calibrated = False
+                self.updates = 0
+
+            def calibrate(self, _known_angle, **_kwargs):
+                self.calibrated = True
+
+            def update(self):
+                self.updates += 1
+                return self.value
+
+            def magnet_state(self):
+                return "ok"
+
+        j1 = FakeEncoder(0.0)
+        j2 = FakeEncoder(math.radians(180) * swivelcut.GEAR_J2)
+        arm = swivelcut.SwivelCut(encoders=(j1, j2))
+
+        arm.calibrate_j2_encoder()
+
+        self.assertFalse(j1.calibrated)
+        self.assertTrue(j2.calibrated)
+        self.assertEqual(j1.updates, 0)
+        self.assertAlmostEqual(arm.encoder_angles()[1], 180.0)
+
+    def test_j2_only_mode_blocks_j1_motion(self):
+        class FakeEncoder:
+            def calibrate(self, _known_angle, **_kwargs):
+                pass
+
+            def update(self):
+                return math.radians(180) * swivelcut.GEAR_J2
+
+        arm = swivelcut.SwivelCut(encoders=(FakeEncoder(), FakeEncoder()))
+        arm.calibrate_j2_encoder()
+
+        with self.assertRaisesRegex(Exception, "blocks J1 motion"):
+            arm.move_joint(1, 10)
+
+    def test_encoder_status_reports_each_missing_sensor_independently(self):
+        class FoundEncoder:
+            def magnet_state(self):
+                return "weak"
+
+        class MissingEncoder:
+            def magnet_state(self):
+                raise OSError("no response")
+
+        arm = swivelcut.SwivelCut(
+            encoders=(FoundEncoder(), MissingEncoder())
+        )
+
+        self.assertEqual(
+            arm.encoder_status(),
+            ("found magnet=weak", "not found magnet=unknown"),
+        )
 
     def test_j1_only_mode_blocks_j2_motion(self):
         class FakeEncoder:

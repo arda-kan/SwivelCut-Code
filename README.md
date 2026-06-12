@@ -315,8 +315,9 @@ above.
 | --- | --- | --- |
 | `ARM FOLDED` | Calibrates both encoders at `J1=0`, `J2=180` and enables the drivers. | Physically fold the arm first. This command resets the controller's assumed pose. |
 | `ARM J1` | Calibrates only the J1 encoder at `J1=0` for single-motor testing and teaching. | Physically fold the arm first. Use `TEACH J1`, not ordinary `TEACH`. |
+| `ARM J2` | Calibrates only the J2 encoder at the folded `J2=180` home and enables J2. | Physically fold the arm first. Only `J2 <deg>` motion is allowed in this mode. |
 | `DISARM` | Immediately disables both motor drivers. | To resume ordinary motion, physically fold the arm and use `ARM FOLDED` again. |
-| `ENC` | Reads magnet health and measured encoder angles. | Use this after moving a disabled arm by hand. It reports sensor measurements, unlike `POS`. |
+| `ENC` | Reports whether each AS5600 is found and whether its magnet is OK, weak, strong, or missing. | Calibrated encoder angles are included when available. |
 | `STREAM ON` | Continuously prints measured encoder angles and raw values. | `RAW1` and `RAW2` are signed 12-bit counts (`-2048` to `2047`), so decreasing rotation crosses smoothly through zero. |
 | `STREAM OFF` | Stops continuous encoder output. | Does not change motor state. |
 | `STREAM RATE <Hz>` | Sets continuous output from 1 to 50 Hz. | Example: `STREAM RATE 20`. |

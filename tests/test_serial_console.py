@@ -36,8 +36,11 @@ class FakeArm:
     def calibrate_j1_encoder(self):
         self.calls.append(("calibrate_j1",))
 
+    def calibrate_j2_encoder(self):
+        self.calls.append(("calibrate_j2",))
+
     def encoder_status(self):
-        return "ok", "ok"
+        return "found magnet=ok", "found magnet=ok"
 
     def encoder_angles(self):
         return self.encoder_pose
@@ -130,6 +133,25 @@ class SwivelCutConsoleTests(unittest.TestCase):
         self.assertEqual(self.console.arm_mode, "j1")
         self.assertIn(("play",), self.arm.calls)
 
+    def test_arm_j2_calibrates_only_j2_and_blocks_other_motion(self):
+        self.console.execute("ARM J2")
+        self.console.execute("J2 175")
+
+        self.assertEqual(
+            self.arm.calls,
+            [
+                ("disable",),
+                ("folded",),
+                ("calibrate_j2",),
+                ("enable",),
+                ("joint", 2, 175.0),
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "only J2"):
+            self.console.execute("J1 10")
+        with self.assertRaisesRegex(ValueError, "only J2"):
+            self.console.execute("TEACH 2")
+
     def test_degree_and_cartesian_commands(self):
         self.console.execute("ARM FOLDED")
         self.console.execute("J1 30")
@@ -166,7 +188,11 @@ class SwivelCutConsoleTests(unittest.TestCase):
     def test_encoder_status_is_reported(self):
         self.console.execute("ENC")
 
-        self.assertEqual(self.output[-1], "ENC J1=ok J2=ok J1=0.00 J2=180.00")
+        self.assertEqual(
+            self.output[-1],
+            "ENC J1=[found magnet=ok] J2=[found magnet=ok] "
+            "J1=0.00 J2=180.00",
+        )
 
     def test_teach_disarms_then_play_rearms(self):
         self.console.execute("ARM FOLDED")
