@@ -20,6 +20,7 @@ constexpr int REPEAT_BUTTON_PIN = 23;
 constexpr int HEAD_ID_PIN = 34;
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 35;
 constexpr unsigned long HEAD_SAMPLE_INTERVAL_MS = 20;
+constexpr unsigned long CONTROL_TEST_REPORT_MS = 500;
 constexpr int HEAD_STABLE_SAMPLE_COUNT = 5;
 
 constexpr int CUTTING_HEAD_ADC_MIN = 400;
@@ -244,9 +245,13 @@ int candidateHeadSamples = 0;
 int latestHeadAdc = 0;
 bool headTypeInitialized = false;
 unsigned long nextHeadSampleMs = 0;
+bool controlTestEnabled = false;
+unsigned long nextControlTestReportMs = 0;
 
 float currentJ1Deg() { return j1PositionSteps / J1_STEPS_PER_DEG; }
 float currentJ2Deg() { return j2PositionSteps / J2_STEPS_PER_DEG; }
+
+void disableDrivers();
 
 const char *headTypeName(HeadType type) {
   switch (type) {
@@ -273,13 +278,14 @@ HeadType classifyHeadAdc(int adc) {
 }
 
 void printButtonEvent(const ButtonInput &button) {
-  Serial.print("BUTTON ");
+  Serial.print("PIN ");
   Serial.print(button.number);
-  Serial.print(" ");
+  Serial.print(button.stableState == LOW ? " PRESSED" : " RELEASED");
+  Serial.print(" - ");
   Serial.print(button.name);
-  Serial.print(" GPIO");
+  Serial.print(" (GPIO");
   Serial.print(button.pin);
-  Serial.println(button.stableState == LOW ? " PRESSED" : " RELEASED");
+  Serial.println(")");
 }
 
 void printControlStatus() {
@@ -314,7 +320,7 @@ void serviceControlInputs() {
     if (raw != button.stableState &&
         now - button.rawChangedMs >= BUTTON_DEBOUNCE_MS) {
       button.stableState = raw;
-      printButtonEvent(button);
+      if (controlTestEnabled) printButtonEvent(button);
     }
   }
 
@@ -335,11 +341,46 @@ void serviceControlInputs() {
       (!headTypeInitialized || candidateHeadType != stableHeadType)) {
     stableHeadType = candidateHeadType;
     headTypeInitialized = true;
-    Serial.print("HEAD ");
-    Serial.print(headTypeName(stableHeadType));
-    Serial.print(" ADC=");
-    Serial.println(latestHeadAdc);
+    if (controlTestEnabled) {
+      Serial.print("HEAD ");
+      Serial.print(headTypeName(stableHeadType));
+      Serial.print(" ADC=");
+      Serial.println(latestHeadAdc);
+    }
   }
+
+  if (controlTestEnabled &&
+      static_cast<long>(now - nextControlTestReportMs) >= 0) {
+    nextControlTestReportMs = now + CONTROL_TEST_REPORT_MS;
+    printControlStatus();
+  }
+}
+
+void setControlTest(bool enabled) {
+  controlTestEnabled = enabled;
+  if (!enabled) {
+    Serial.println("CONTROL TEST OFF");
+    return;
+  }
+
+  disableDrivers();
+  digitalWrite(BLADE_IN1_PIN, LOW);
+  digitalWrite(BLADE_IN2_PIN, LOW);
+  encoderStreamEnabled = false;
+  const unsigned long now = millis();
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    buttons[i].rawState = digitalRead(buttons[i].pin);
+    buttons[i].stableState = buttons[i].rawState;
+    buttons[i].rawChangedMs = now;
+  }
+  candidateHeadSamples = 0;
+  headTypeInitialized = false;
+  nextHeadSampleMs = 0;
+  nextControlTestReportMs = now;
+  Serial.println(
+      "CONTROL TEST ON: motors and blade outputs disabled; "
+      "press buttons or change head");
+  printControlStatus();
 }
 
 void enableDrivers() {
@@ -790,7 +831,7 @@ void printHelp() {
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
   Serial.println("  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>");
   Serial.println("  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS");
-  Serial.println("  CONTROLS");
+  Serial.println("  CONTROLS | CONTROL TEST ON | CONTROL TEST OFF");
   Serial.println("  PLAY | CLEAR | POS | HELP");
 }
 
@@ -832,6 +873,20 @@ void handleCommand(String command) {
   if (command.length() == 0) return;
   command.toUpperCase();
 
+  if (command == "CONTROL TEST ON") return setControlTest(true);
+  if (command == "CONTROL TEST OFF") return setControlTest(false);
+  if (command == "CONTROL TEST STATUS") {
+    Serial.println(controlTestEnabled ? "CONTROL TEST ON" : "CONTROL TEST OFF");
+    return;
+  }
+  if (command == "CONTROLS") return printControlStatus();
+  if (command == "HELP") return printHelp();
+  if (controlTestEnabled) {
+    Serial.println(
+        "ERROR: CONTROL TEST is active; use CONTROL TEST OFF first");
+    return;
+  }
+
   if (command == "ARM FOLDED") return armAtFoldedPose(AxisMode::DUAL);
   if (command == "ARM J1") return armAtFoldedPose(AxisMode::J1_ONLY);
   if (command == "ARM J2") return armAtFoldedPose(AxisMode::J2_ONLY);
@@ -842,8 +897,6 @@ void handleCommand(String command) {
     return;
   }
   if (command == "POS") return printPosition();
-  if (command == "CONTROLS") return printControlStatus();
-  if (command == "HELP") return printHelp();
   if (command == "CLEAR") {
     taughtCount = 0;
     Serial.println("TAUGHT MOVEMENT CLEARED");
@@ -1034,7 +1087,7 @@ void setup() {
   Serial.println();
   Serial.println("SwivelCut Arduino controller ready");
   Serial.println("Fold the arm, then type ARM FOLDED");
-  Serial.println("Type CONTROLS to print buttons and head ID.");
+  Serial.println("Type CONTROL TEST ON to test buttons and head ID.");
   printHelp();
 }
 

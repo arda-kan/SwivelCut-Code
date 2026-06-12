@@ -91,9 +91,12 @@ classifications before reporting a head change:
 | Disconnected | Open | 3500-4095 |
 | Unknown | Any other reading | Outside the ranges above |
 
-Use `CONTROLS` in the serial console to print all three button states and the
-current head type/ADC value. Button and stable head changes are also printed
-automatically.
+Use `CONTROL TEST ON` to enter an input-only tester. It disables the stepper
+drivers and holds both blade H-bridge inputs LOW, then prints button/head
+activity without starting any machine function. It also prints a live status
+line every 500 ms so wiring can be checked even when no state change is
+detected. Use `CONTROL TEST OFF` to leave the tester. `CONTROLS` prints one
+immediate snapshot without entering test mode.
 
 Positive joint angles are counterclockwise when viewed from above the cutting
 plane. J1 uses the normal driver direction and J2 is inverted to match the
@@ -356,6 +359,8 @@ above.
 | `FEEDBACK ON` | Restores encoder correction and position-fault shutdown. | This is the default after every reset. |
 | `FEEDBACK STATUS` | Prints the current feedback mode. | Does not change motor state. |
 | `CONTROLS` | Prints all three debounced button states, the hardware-only power switch note, and the stable head ID with its ADC reading. | Button and stable head changes are also printed automatically. |
+| `CONTROL TEST ON` | Starts the input-only button and head-ID tester. | Disables motors and blade outputs; reports changes and a status line every 500 ms. |
+| `CONTROL TEST OFF` | Stops the input tester. | Does not arm or move anything. |
 | `POS` | Prints the controller's current `X`, `Y`, `J1`, and `J2` state. | This is software state. It is not refreshed by arbitrary hand movement while disarmed. |
 | `J1 <deg>` | Moves J1 to an absolute shoulder angle while holding J2. | Allowed range is `-90` to `+90` degrees. |
 | `J2 <deg>` | Moves J2 to an absolute elbow angle while holding J1. | Allowed range is `-180` to `+180` degrees. |
