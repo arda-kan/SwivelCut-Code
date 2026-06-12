@@ -64,12 +64,13 @@ feedback errors during powered movement still disable the driver.
 - GPIO 33: J2 direction
 - GPIO 27: shared enable
 - GPIO 13/14: blade H-bridge inputs
-- GPIO 18: Start/Stop button, normally open to GND
-- GPIO 19: Stabilization button, normally open to GND
+- GPIO 18/19: I2C bus 1 for the J2 AS5600 encoder
+- GPIO 21: Start/Stop button, normally open to GND
+- GPIO 22: Stabilization button, normally open to GND
 - GPIO 23: Repeat button, normally open to GND
 - GPIO 34: head-ID voltage-divider ADC input
 
-GPIO18, GPIO19, and GPIO23 use the ESP32 internal pull-ups. A pressed button
+GPIO21, GPIO22, and GPIO23 use the ESP32 internal pull-ups. A pressed button
 reads LOW and a released button reads HIGH. The firmware debounces each input
 for 35 ms and prints named `PRESSED` and `RELEASED` events. The latching power
 switch cuts hardware power directly and is not connected to a GPIO.
@@ -118,7 +119,7 @@ independent software-I2C buses:
 | Encoder | SDA | SCL |
 | --- | ---: | ---: |
 | J1 motor shaft | GPIO 16 | GPIO 17 |
-| J2 motor shaft | GPIO 21 | GPIO 22 |
+| J2 motor shaft | GPIO 18 | GPIO 19 |
 
 Wire the module pins as follows:
 
@@ -135,8 +136,8 @@ Wire the module pins as follows:
 | --- | --- |
 | VCC | ESP32 `3V3` |
 | GND | ESP32 `GND` |
-| SDA | ESP32 `GPIO 21` |
-| SCL | ESP32 `GPIO 22` |
+| SDA | ESP32 `GPIO 18` |
+| SCL | ESP32 `GPIO 19` |
 | DIR | Leave disconnected |
 | OUT | Leave disconnected |
 
@@ -205,7 +206,7 @@ The expected startup output contains address `0x36` on both buses:
 
 ```text
 J1 bus: SDA=GPIO16 SCL=GPIO17 devices=['0x36']
-J2 bus: SDA=GPIO21 SCL=GPIO22 devices=['0x36']
+J2 bus: SDA=GPIO18 SCL=GPIO19 devices=['0x36']
 Both encoders found. Press Ctrl-C to stop.
 ```
 
