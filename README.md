@@ -86,8 +86,8 @@ classifications before reporting a head change:
 
 | Head | Head resistor | Accepted ADC range |
 | --- | ---: | ---: |
-| Cutting | 2.2k | 400-1125 |
-| Tracing | 10k | 1500-2550 |
+| Cutter | 2.2k | 400-1125 |
+| Tracer | 10k | 1500-2550 |
 | Disconnected | Open | 3500-4095 |
 | Unknown | Any other reading | Outside the ranges above |
 

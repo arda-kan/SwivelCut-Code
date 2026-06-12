@@ -256,9 +256,9 @@ void disableDrivers();
 const char *headTypeName(HeadType type) {
   switch (type) {
     case HeadType::CUTTING:
-      return "CUTTING";
+      return "CUTTER";
     case HeadType::TRACING:
-      return "TRACING";
+      return "TRACER";
     case HeadType::DISCONNECTED:
       return "DISCONNECTED";
     default:
