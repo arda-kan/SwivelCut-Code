@@ -72,11 +72,13 @@ Five consistent readings are required before a head change is accepted.
 3. Press Start/Stop once to begin recording and press it again to stop.
 4. Install the cutter head.
 5. Optionally toggle Stabilization while idle.
-6. Press Start/Stop once to begin cutting and press it again to stop.
+6. Press Start/Stop once to run the complete cut.
 7. Press Repeat to repeat the last completed cut.
 
-Head removal during teaching discards the incomplete trace. Head removal or
-another Start/Stop press during a cut aborts motion and retracts the blade.
+Head removal during teaching discards the incomplete trace. A confirmed cutter
+head removal during a cut aborts motion and retracts the blade. Product buttons
+are ignored whenever the motors are moving, including cuts and repeats;
+Stabilization can only change while the machine is idle and stationary.
 After a successful cut, Start/Stop will not run the same trace again; teach a
 new movement or use Repeat for another pass.
 

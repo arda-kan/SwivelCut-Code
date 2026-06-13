@@ -298,6 +298,7 @@ bool bladeExtended = false;
 bool productCutActive = false;
 bool productAbortRequested = false;
 bool productHasLastCut = false;
+bool motorsMoving = false;
 unsigned long productTeachStartedMs = 0;
 unsigned long nextProductTeachSampleMs = 0;
 
@@ -450,7 +451,8 @@ void serviceControlInputs() {
       button.stableState = raw;
       if (controlTestEnabled) printButtonEvent(button);
       if (stateTestEnabled) printStateTestEvent(button);
-      if (!controlTestEnabled && !stateTestEnabled) {
+      if (!controlTestEnabled && !stateTestEnabled &&
+          productState != ProductState::CUTTING && !motorsMoving) {
         handleProductButtonChange(button);
       }
     }
@@ -725,6 +727,7 @@ bool executeSteps(long deltaJ1, long deltaJ2) {
   const long countJ2 = labs(deltaJ2);
   const long total = max(countJ1, countJ2);
   if (total == 0) return true;
+  motorsMoving = true;
 
   setDirection(J1_DIR_PIN, deltaJ1, INVERT_J1);
   setDirection(J2_DIR_PIN, deltaJ2, INVERT_J2);
@@ -753,12 +756,18 @@ bool executeSteps(long deltaJ1, long deltaJ2) {
     if (productCutActive) {
       if (productAbortRequested) {
         Serial.println("CUT_ABORTED");
+        motorsMoving = false;
         return false;
       }
     }
-    if (USE_ENCODERS && (i & 255) == 255 && !checkFeedback()) return false;
+    if (USE_ENCODERS && (i & 255) == 255 && !checkFeedback()) {
+      motorsMoving = false;
+      return false;
+    }
   }
-  return checkFeedback();
+  const bool feedbackOk = checkFeedback();
+  motorsMoving = false;
+  return feedbackOk;
 }
 
 bool angleInRange(float j1Deg, float j2Deg) {
@@ -1531,9 +1540,10 @@ bool parseElbow(const char *text) {
 void printHelp() {
   Serial.println("Physical product controls after ARM FOLDED:");
   Serial.println("  Start/Stop + tracer: press to start/stop recording");
-  Serial.println("  Start/Stop + cutter: press to start/stop cutting");
+  Serial.println("  Start/Stop + cutter: press once to run the full cut");
   Serial.println("  Stabilization: toggle while idle");
-  Serial.println("  Repeat: repeat the last completed cut");
+  Serial.println("  Repeat: press once to run the full repeat");
+  Serial.println("  Product buttons are ignored while motors are moving");
   Serial.println("Commands:");
   Serial.println("  ARM FOLDED | ARM J1 | ARM J2 | DISARM");
   Serial.println("  TEST J1 <steps> | TEST J2 <steps>");
