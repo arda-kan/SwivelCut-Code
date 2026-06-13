@@ -1,0 +1,1252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SwivelCut Firmware Simulator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e13;
+      --panel: #121720;
+      --panel2: #171e29;
+      --line: #2a3443;
+      --text: #e8edf4;
+      --muted: #8f9bad;
+      --cyan: #57d6d0;
+      --orange: #ff9d57;
+      --red: #ff6b72;
+      --green: #78d89a;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .32);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(87,214,208,.10), transparent 35%),
+        radial-gradient(circle at 95% 10%, rgba(255,157,87,.08), transparent 28%),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input { font: inherit; }
+    .app { max-width: 1600px; margin: 0 auto; padding: 22px; }
+    header {
+      display: flex; align-items: end; justify-content: space-between; gap: 20px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: clamp(25px, 3vw, 40px); letter-spacing: -.04em; }
+    .subtitle { color: var(--muted); max-width: 760px; margin-top: 5px; }
+    .status-strip { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .badge {
+      border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+      padding: 6px 10px; color: var(--muted); white-space: nowrap;
+    }
+    .badge strong { color: var(--text); font-weight: 650; }
+    .layout { display: grid; grid-template-columns: minmax(480px, 1.4fr) minmax(420px, 1fr); gap: 16px; }
+    .stack { display: grid; gap: 16px; align-content: start; }
+    .panel {
+      border: 1px solid var(--line); border-radius: 16px; background: rgba(18,23,32,.94);
+      box-shadow: var(--shadow); overflow: hidden;
+    }
+    .panel-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 13px 16px; border-bottom: 1px solid var(--line);
+    }
+    .panel-head h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .12em; margin: 0; color: #c7d0dc; }
+    .hint { color: var(--muted); font-size: 12px; }
+    .arm-wrap { position: relative; min-height: 560px; background: #0e131b; }
+    #armSvg { display: block; width: 100%; height: 600px; touch-action: none; cursor: default; }
+    #armSvg.teaching { cursor: crosshair; }
+    .grid-line { stroke: #222c39; stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .axis-line { stroke: #526074; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+    .workspace { fill: none; stroke: #354254; stroke-width: 1.5; stroke-dasharray: 5 7; vector-effect: non-scaling-stroke; }
+    .trail { fill: none; stroke: rgba(87,214,208,.55); stroke-width: 2; vector-effect: non-scaling-stroke; }
+    .raw-trail { fill: none; stroke: rgba(255,157,87,.45); stroke-width: 1.5; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+    .link1, .link2 { stroke-linecap: round; vector-effect: non-scaling-stroke; }
+    .link1 { stroke: var(--cyan); stroke-width: 13; }
+    .link2 { stroke: var(--orange); stroke-width: 11; }
+    .joint { vector-effect: non-scaling-stroke; stroke: #091018; stroke-width: 4; }
+    .base { fill: #dce5ef; }
+    .elbow { fill: var(--orange); }
+    .effector { fill: #fff; stroke: var(--cyan); stroke-width: 5; cursor: grab; }
+    #armSvg.teaching .effector { cursor: grab; }
+    #armSvg.dragging .effector { cursor: grabbing; }
+    .arm-overlay {
+      position: absolute; left: 14px; top: 14px; display: grid; gap: 6px; pointer-events: none;
+    }
+    .readout {
+      background: rgba(7,10,15,.78); border: 1px solid rgba(255,255,255,.08);
+      border-radius: 9px; padding: 7px 9px; font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .teach-callout {
+      position: absolute; right: 14px; top: 14px; max-width: 270px;
+      background: rgba(87,214,208,.12); border: 1px solid rgba(87,214,208,.5);
+      color: #c9fffb; border-radius: 10px; padding: 9px 11px; display: none;
+    }
+    .teach-callout.show { display: block; }
+    .controls { padding: 14px 16px 16px; display: grid; gap: 13px; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    button {
+      border: 1px solid var(--line); color: var(--text); background: var(--panel2);
+      border-radius: 9px; padding: 8px 11px; cursor: pointer;
+    }
+    button:hover { border-color: #516079; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.primary { color: #061112; background: var(--cyan); border-color: var(--cyan); font-weight: 700; }
+    button.danger { color: #ffe8e9; border-color: rgba(255,107,114,.55); background: rgba(255,107,114,.12); }
+    .field-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+    input {
+      width: 100%; border: 1px solid var(--line); border-radius: 9px;
+      background: #0c1118; color: var(--text); padding: 9px 10px; outline: none;
+    }
+    input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(87,214,208,.09); }
+    input[readonly] { color: var(--muted); background: #10151d; }
+    #log {
+      height: 350px; overflow: auto; margin: 0; padding: 14px 16px;
+      background: #090d12; color: #cdd7e4; white-space: pre-wrap;
+      font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .constants { padding: 14px 16px 17px; }
+    .constant-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }
+    label { display: grid; grid-template-columns: minmax(0, 1fr) 105px; align-items: center; gap: 9px; color: #bec8d5; font-size: 12px; }
+    label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    label input { padding: 6px 8px; text-align: right; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .switch-field input { accent-color: var(--cyan); width: 18px; justify-self: end; }
+    .section-label {
+      grid-column: 1 / -1; color: var(--muted); text-transform: uppercase;
+      letter-spacing: .11em; font-size: 10px; margin-top: 7px; border-top: 1px solid var(--line); padding-top: 11px;
+    }
+    .telemetry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 12px 16px 15px; }
+    .metric { border: 1px solid var(--line); border-radius: 10px; padding: 8px 9px; background: #0d1219; }
+    .metric span { display: block; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+    .metric strong { display: block; margin-top: 3px; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    @media (max-width: 1050px) {
+      .layout { grid-template-columns: 1fr; }
+      .arm-wrap { min-height: 470px; }
+      #armSvg { height: 520px; }
+    }
+    @media (max-width: 620px) {
+      .app { padding: 12px; }
+      header { align-items: start; flex-direction: column; }
+      .constant-grid { grid-template-columns: 1fr; }
+      .section-label { grid-column: 1; }
+      .telemetry { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>SwivelCut Firmware Simulator</h1>
+      <div class="subtitle">A browser port of <code>codex/esp32-buttons-head-id</code>. Motion, feedback, teaching, replay, and serial commands use the firmware algorithms; GPIO and AS5600 hardware are simulated.</div>
+    </div>
+    <div class="status-strip">
+      <div class="badge">State <strong id="statusState">DISARMED</strong></div>
+      <div class="badge">Mode <strong id="statusMode">DUAL</strong></div>
+      <div class="badge">Teach points <strong id="statusPoints">0</strong></div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="stack">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Simulated Arm</h2>
+          <div class="hint">Positive X right, positive Y forward</div>
+        </div>
+        <div class="arm-wrap">
+          <svg id="armSvg" viewBox="-450 -450 900 900" aria-label="Two-link robot arm">
+            <g id="world" transform="scale(1,-1)">
+              <circle id="workspaceOuter" class="workspace" cx="0" cy="0" r="400"></circle>
+              <circle id="workspaceInner" class="workspace" cx="0" cy="0" r="0"></circle>
+              <g id="grid"></g>
+              <line class="axis-line" x1="-440" y1="0" x2="440" y2="0"></line>
+              <line class="axis-line" x1="0" y1="-440" x2="0" y2="440"></line>
+              <polyline id="rawTrail" class="raw-trail" points=""></polyline>
+              <polyline id="trail" class="trail" points=""></polyline>
+              <line id="link1" class="link1" x1="0" y1="0" x2="0" y2="200"></line>
+              <line id="link2" class="link2" x1="0" y1="200" x2="0" y2="0"></line>
+              <circle class="joint base" cx="0" cy="0" r="13"></circle>
+              <circle id="elbow" class="joint elbow" cx="0" cy="200" r="11"></circle>
+              <circle id="effector" class="joint effector" cx="0" cy="0" r="13"></circle>
+            </g>
+          </svg>
+          <div class="arm-overlay">
+            <div class="readout" id="poseReadout"></div>
+            <div class="readout" id="encoderReadout"></div>
+          </div>
+          <div id="teachCallout" class="teach-callout">TEACH is sampling. Drag the white end-effector point; the cursor is converted with the firmware inverse kinematics.</div>
+        </div>
+        <div class="telemetry">
+          <div class="metric"><span>J1 steps</span><strong id="mJ1Steps">0</strong></div>
+          <div class="metric"><span>J2 steps</span><strong id="mJ2Steps">0</strong></div>
+          <div class="metric"><span>Direction J1</span><strong id="mDirJ1">LOW</strong></div>
+          <div class="metric"><span>Direction J2</span><strong id="mDirJ2">LOW</strong></div>
+          <div class="metric"><span>Corrections</span><strong id="mCorrections">0</strong></div>
+          <div class="metric"><span>Feedback</span><strong id="mFeedback">ON</strong></div>
+          <div class="metric"><span>XY branch</span><strong id="mBranch">UP</strong></div>
+          <div class="metric"><span>Last pulse</span><strong id="mPulse">—</strong></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Serial Console</h2>
+          <div class="hint">Enter sends a firmware command</div>
+        </div>
+        <pre id="log"></pre>
+        <div class="controls">
+          <div class="field-row">
+            <input id="commandInput" autocomplete="off" spellcheck="false" placeholder="ARM FOLDED">
+            <button id="sendButton" class="primary">Send</button>
+          </div>
+          <div class="button-row">
+            <button data-command="ARM FOLDED">ARM FOLDED</button>
+            <button data-command="POS">POS</button>
+            <button data-command="ENC">ENC</button>
+            <button data-command="PLAY">PLAY</button>
+            <button data-command="FEEDBACK ON">Feedback on</button>
+            <button data-command="FEEDBACK OFF">Feedback off</button>
+            <button data-command="CLEAR">Clear path</button>
+            <button id="clearLog">Clear log</button>
+            <button data-command="DISARM" class="danger">DISARM</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="stack">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Firmware Constants</h2>
+          <div class="hint">Changes apply immediately</div>
+        </div>
+        <div class="constants">
+          <div id="constantGrid" class="constant-grid"></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+// The defaults below are copied from SwivelCutArduino.ino.
+const DEFAULTS = Object.freeze({
+  FULL_STEPS_PER_REV: 200,
+  MICROSTEP: 4,
+  J1_GEAR_RATIO: 6.0,
+  J2_GEAR_RATIO: 9.0,
+  LINK_1_MM: 200.0,
+  LINK_2_MM: 200.0,
+  J1_MIN_DEG: -90.0,
+  J1_MAX_DEG: 90.0,
+  J2_MIN_DEG: -180.0,
+  J2_MAX_DEG: 180.0,
+  INVERT_J1: false,
+  INVERT_J2: true,
+  ENCODER_J1_SIGN: -1,
+  ENCODER_J2_SIGN: 1,
+  FEEDBACK_TOLERANCE_DEG: 0.25,
+  FEEDBACK_MAX_ERROR_DEG: 10.0,
+  FEEDBACK_MAX_CORRECTIONS: 3,
+  PRODUCT_TEACH_HZ: 20.0,
+  PRODUCT_SMOOTHING_MS: 150.0,
+  PRODUCT_MAX_DEVIATION_DEG: 1.0,
+  XY_SMOOTHING_IMPLEMENTED: false,
+});
+
+const C = { ...DEFAULTS };
+const MAX_TEACH_POINTS = 3000;
+const AxisMode = Object.freeze({ DUAL: "DUAL", J1_ONLY: "J1_ONLY", J2_ONLY: "J2_ONLY" });
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+const radians = degrees => degrees * Math.PI / 180.0;
+const degrees = radiansValue => radiansValue * 180.0 / Math.PI;
+const lroundf = value => value >= 0 ? Math.floor(value + 0.5) : Math.ceil(value - 0.5);
+const fabsf = Math.abs;
+
+const state = {
+  j1PositionSteps: 0,
+  j2PositionSteps: 0,
+  trueJ1Steps: 0,
+  trueJ2Steps: 0,
+  taught: [],
+  rawTaught: [],
+  taughtJ1Only: false,
+  armed: false,
+  armMode: AxisMode.DUAL,
+  encoderFault: false,
+  encodersCalibrated: false,
+  encoderMode: AxisMode.DUAL,
+  encoderFeedbackEnabled: true,
+  encoderStreamEnabled: false,
+  encoderStreamHz: 10.0,
+  encoderStreamTimer: null,
+  busy: false,
+  teaching: false,
+  teachCancelled: false,
+  teachPose: null,
+  dragging: false,
+  encoderOffsetJ1: 0,
+  encoderOffsetJ2: 0,
+  lastDirectionJ1: false,
+  lastDirectionJ2: false,
+  lastPulse: "—",
+  correctionCount: 0,
+  elbowDown: false,
+};
+
+function J1_STEPS_PER_DEG() {
+  return C.FULL_STEPS_PER_REV * C.MICROSTEP * C.J1_GEAR_RATIO / 360.0;
+}
+function J2_STEPS_PER_DEG() {
+  return C.FULL_STEPS_PER_REV * C.MICROSTEP * C.J2_GEAR_RATIO / 360.0;
+}
+function currentJ1Deg() { return state.j1PositionSteps / J1_STEPS_PER_DEG(); }
+function currentJ2Deg() { return state.j2PositionSteps / J2_STEPS_PER_DEG(); }
+function trueJ1Deg() { return state.trueJ1Steps / J1_STEPS_PER_DEG(); }
+function trueJ2Deg() { return state.trueJ2Steps / J2_STEPS_PER_DEG(); }
+
+function logLine(text = "") {
+  const log = $("log");
+  log.textContent += text + "\n";
+  log.scrollTop = log.scrollHeight;
+}
+
+function fixed(value, digits) {
+  return Number.isFinite(value) ? value.toFixed(digits) : "nan";
+}
+
+function angleInRange(j1Deg, j2Deg) {
+  return j1Deg >= C.J1_MIN_DEG && j1Deg <= C.J1_MAX_DEG &&
+         j2Deg >= C.J2_MIN_DEG && j2Deg <= C.J2_MAX_DEG;
+}
+
+function forwardKinematics(j1Deg, j2Deg) {
+  const t1 = radians(j1Deg);
+  const t2 = radians(j2Deg);
+  const y = C.LINK_1_MM * Math.cos(t1) + C.LINK_2_MM * Math.cos(t1 + t2);
+  const x = C.LINK_1_MM * Math.sin(t1) + C.LINK_2_MM * Math.sin(t1 + t2);
+  return { x, y };
+}
+
+function inverseKinematics(x, y, elbowDown) {
+  let c2 = (x * x + y * y - C.LINK_1_MM * C.LINK_1_MM -
+            C.LINK_2_MM * C.LINK_2_MM) / (2.0 * C.LINK_1_MM * C.LINK_2_MM);
+  if (c2 < -1.00001 || c2 > 1.00001) return null;
+  c2 = clamp(c2, -1.0, 1.0);
+  let s2 = Math.sqrt(Math.max(0.0, 1.0 - c2 * c2));
+  if (elbowDown) s2 = -s2;
+  const t2 = Math.atan2(s2, c2);
+  const t1 = Math.atan2(x, y) -
+             Math.atan2(C.LINK_2_MM * s2, C.LINK_1_MM + C.LINK_2_MM * c2);
+  const j1Deg = degrees(t1);
+  const j2Deg = degrees(t2);
+  return angleInRange(j1Deg, j2Deg) ? { j1Deg, j2Deg } : null;
+}
+
+// Simulated raw encoder polarity is the polarity of the real machine at the
+// firmware defaults. Editing ENCODER_*_SIGN therefore exposes sign mistakes,
+// while the stock values report the true pose exactly.
+function applyEncoderSigns(pose) {
+  const j1Scale = C.ENCODER_J1_SIGN / DEFAULTS.ENCODER_J1_SIGN;
+  const j2Scale = C.ENCODER_J2_SIGN / DEFAULTS.ENCODER_J2_SIGN;
+  return {
+    j1Deg: pose.j1Deg * j1Scale + state.encoderOffsetJ1,
+    j2Deg: 180.0 + (pose.j2Deg - 180.0) * j2Scale + state.encoderOffsetJ2,
+  };
+}
+
+function encoderJointAngles() {
+  let pose;
+  if (state.teaching && state.teachPose) {
+    pose = state.teachPose;
+  } else {
+    pose = { j1Deg: trueJ1Deg(), j2Deg: trueJ2Deg() };
+  }
+  const measured = applyEncoderSigns(pose);
+  if (state.encoderMode === AxisMode.J2_ONLY) measured.j1Deg = currentJ1Deg();
+  if (state.encoderMode === AxisMode.J1_ONLY) measured.j2Deg = currentJ2Deg();
+  return measured;
+}
+
+function simulatedRaw(deg, joint) {
+  const motorDeg = joint === 1 ? deg * C.J1_GEAR_RATIO : (deg - 180.0) * C.J2_GEAR_RATIO;
+  let raw = lroundf((motorDeg / 360.0) * 4096.0);
+  raw = ((raw % 4096) + 4096) % 4096;
+  return raw > 2047 ? raw - 4096 : raw;
+}
+
+function printOperationReport(label) {
+  const softwareJ1 = currentJ1Deg();
+  const softwareJ2 = currentJ2Deg();
+  const { x, y } = forwardKinematics(softwareJ1, softwareJ2);
+  let line = `REPORT ${label} SW_J1=${fixed(softwareJ1, 2)} SW_J2=${fixed(softwareJ2, 2)} X=${fixed(x, 1)} Y=${fixed(y, 1)}`;
+  if (state.encodersCalibrated) {
+    const encoder = encoderJointAngles();
+    line += ` ENC_J1=${fixed(encoder.j1Deg, 2)} ENC_J2=${fixed(encoder.j2Deg, 2)}`;
+    if (state.encoderMode !== AxisMode.J2_ONLY) line += ` RAW1=${simulatedRaw(encoder.j1Deg, 1)}`;
+    if (state.encoderMode !== AxisMode.J1_ONLY) line += ` RAW2=${simulatedRaw(encoder.j2Deg, 2)}`;
+  } else {
+    line += " ENC=UNCALIBRATED";
+  }
+  logLine(line);
+}
+
+function setDirection(axis, delta, invert) {
+  let forward = delta >= 0;
+  if (invert) forward = !forward;
+  if (axis === 1) state.lastDirectionJ1 = forward;
+  else state.lastDirectionJ2 = forward;
+  return forward;
+}
+
+function disableDrivers() {
+  state.armed = false;
+  updateUI();
+}
+
+function enableDrivers() {
+  // The firmware waits 2 ms here. Browser simulation keeps command execution responsive.
+}
+
+function feedbackFault(message) {
+  disableDrivers();
+  state.encoderFault = true;
+  logLine(`FEEDBACK FAULT: ${message}`);
+}
+
+function checkFeedback() {
+  if (!state.encoderFeedbackEnabled) return true;
+  const measured = encoderJointAngles();
+  const errorJ1 = measured.j1Deg - currentJ1Deg();
+  const errorJ2 = measured.j2Deg - currentJ2Deg();
+  if ((state.armMode !== AxisMode.J2_ONLY && fabsf(errorJ1) > C.FEEDBACK_MAX_ERROR_DEG) ||
+      (state.armMode !== AxisMode.J1_ONLY && fabsf(errorJ2) > C.FEEDBACK_MAX_ERROR_DEG)) {
+    disableDrivers();
+    state.encoderFault = true;
+    let line = "FEEDBACK FAULT:";
+    if (state.armMode !== AxisMode.J2_ONLY) {
+      line += ` expected J1=${fixed(currentJ1Deg(), 2)} measured J1=${fixed(measured.j1Deg, 2)} error=${fixed(errorJ1, 2)}`;
+    }
+    if (state.armMode !== AxisMode.J1_ONLY) {
+      line += `; expected J2=${fixed(currentJ2Deg(), 2)} measured J2=${fixed(measured.j2Deg, 2)} error=${fixed(errorJ2, 2)}`;
+    }
+    logLine(line);
+    return false;
+  }
+  return true;
+}
+
+async function executeSteps(deltaJ1, deltaJ2) {
+  deltaJ1 = Math.trunc(deltaJ1);
+  deltaJ2 = Math.trunc(deltaJ2);
+  const countJ1 = Math.abs(deltaJ1);
+  const countJ2 = Math.abs(deltaJ2);
+  const total = Math.max(countJ1, countJ2);
+  if (total === 0) return true;
+
+  setDirection(1, deltaJ1, C.INVERT_J1);
+  setDirection(2, deltaJ2, C.INVERT_J2);
+
+  let errorJ1 = 0;
+  let errorJ2 = 0;
+  const renderEvery = Math.max(1, Math.floor(total / 180));
+  for (let i = 0; i < total; ++i) {
+    errorJ1 += countJ1;
+    errorJ2 += countJ2;
+    let stepJ1 = false;
+    let stepJ2 = false;
+    if (errorJ1 >= total) {
+      errorJ1 -= total;
+      stepJ1 = true;
+      state.j1PositionSteps += deltaJ1 >= 0 ? 1 : -1;
+      state.trueJ1Steps += deltaJ1 >= 0 ? 1 : -1;
+    }
+    if (errorJ2 >= total) {
+      errorJ2 -= total;
+      stepJ2 = true;
+      state.j2PositionSteps += deltaJ2 >= 0 ? 1 : -1;
+      state.trueJ2Steps += deltaJ2 >= 0 ? 1 : -1;
+    }
+    state.lastPulse = stepJ1 && stepJ2 ? "J1 + J2" : stepJ1 ? "J1" : stepJ2 ? "J2" : "—";
+    if ((i & 255) === 255 && !checkFeedback()) return false;
+    if (i % renderEvery === 0) {
+      renderArm();
+      updateTelemetry();
+      await new Promise(requestAnimationFrame);
+    }
+  }
+  renderArm();
+  updateTelemetry();
+  return checkFeedback();
+}
+
+async function moveToAngles(j1Deg, j2Deg, report = true) {
+  if (!state.armed) {
+    logLine("ERROR: type ARM FOLDED first");
+    return false;
+  }
+  if (state.armMode === AxisMode.J1_ONLY && fabsf(j2Deg - currentJ2Deg()) > 0.001) {
+    logLine("ERROR: ARM J1 mode blocks J2 motion");
+    return false;
+  }
+  if (state.armMode === AxisMode.J2_ONLY && fabsf(j1Deg - currentJ1Deg()) > 0.001) {
+    logLine("ERROR: ARM J2 mode blocks J1 motion");
+    return false;
+  }
+  if (!angleInRange(j1Deg, j2Deg)) {
+    logLine("ERROR: angle outside software limits");
+    return false;
+  }
+
+  state.correctionCount = 0;
+  for (let correction = 0; correction <= Math.trunc(C.FEEDBACK_MAX_CORRECTIONS); ++correction) {
+    state.correctionCount = correction;
+    const targetJ1 = lroundf(j1Deg * J1_STEPS_PER_DEG());
+    const targetJ2 = lroundf(j2Deg * J2_STEPS_PER_DEG());
+    if (!await executeSteps(targetJ1 - state.j1PositionSteps,
+                            targetJ2 - state.j2PositionSteps)) return false;
+    if (!state.encoderFeedbackEnabled) break;
+
+    const measured = encoderJointAngles();
+    const errorJ1 = j1Deg - measured.j1Deg;
+    const errorJ2 = j2Deg - measured.j2Deg;
+    const j1Settled = state.armMode === AxisMode.J2_ONLY ||
+                      fabsf(errorJ1) <= C.FEEDBACK_TOLERANCE_DEG;
+    const j2Settled = state.armMode === AxisMode.J1_ONLY ||
+                      fabsf(errorJ2) <= C.FEEDBACK_TOLERANCE_DEG;
+    if (j1Settled && j2Settled) break;
+    if (correction === Math.trunc(C.FEEDBACK_MAX_CORRECTIONS)) {
+      feedbackFault("target did not settle");
+      return false;
+    }
+    if (state.armMode !== AxisMode.J2_ONLY) {
+      state.j1PositionSteps = lroundf(measured.j1Deg * J1_STEPS_PER_DEG());
+    }
+    if (state.armMode !== AxisMode.J1_ONLY) {
+      state.j2PositionSteps = lroundf(measured.j2Deg * J2_STEPS_PER_DEG());
+    }
+  }
+  if (report) {
+    logLine("OK");
+    printOperationReport("MOVE_COMPLETE");
+  }
+  updateUI();
+  return true;
+}
+
+async function moveToXY(x, y, elbowDown) {
+  const angles = inverseKinematics(x, y, elbowDown);
+  if (!angles) {
+    logLine("ERROR: XY point unreachable or outside joint limits");
+    return false;
+  }
+  return moveToAngles(angles.j1Deg, angles.j2Deg, false);
+}
+
+async function cutLine(x0, y0, x1, y1, elbowDown) {
+  const distance = Math.hypot(x1 - x0, y1 - y0);
+  const segments = Math.max(1, Math.ceil(distance / 2.0));
+  for (let i = 0; i <= segments; ++i) {
+    const fraction = i / segments;
+    if (!inverseKinematics(x0 + (x1 - x0) * fraction,
+                           y0 + (y1 - y0) * fraction, elbowDown)) {
+      logLine("ERROR: cut crosses unreachable workspace");
+      return false;
+    }
+  }
+  for (let i = 0; i <= segments; ++i) {
+    const fraction = i / segments;
+    if (!await moveToXY(x0 + (x1 - x0) * fraction,
+                        y0 + (y1 - y0) * fraction, elbowDown)) return false;
+  }
+  logLine("OK");
+  printOperationReport("CUT_LINE_COMPLETE");
+  return true;
+}
+
+function stabilizeTeachPoints(smoothingMs, maxDeviationDeg) {
+  if (state.taught.length < 3 || smoothingMs <= 0.0) return;
+  const teachScratch = state.rawTaught.map(point => ({ ...point }));
+  for (let i = 0; i < state.taught.length; ++i) {
+    let sum1 = 0.0;
+    let sum2 = 0.0;
+    let count = 0;
+    for (let j = 0; j < state.taught.length; ++j) {
+      if (fabsf((teachScratch[j].seconds - teachScratch[i].seconds) * 1000.0) <= smoothingMs) {
+        sum1 += teachScratch[j].j1Deg;
+        sum2 += teachScratch[j].j2Deg;
+        ++count;
+      }
+    }
+    let smooth1 = sum1 / count;
+    let smooth2 = sum2 / count;
+    if (maxDeviationDeg > 0.0) {
+      smooth1 = clamp(smooth1, teachScratch[i].j1Deg - maxDeviationDeg,
+                      teachScratch[i].j1Deg + maxDeviationDeg);
+      smooth2 = clamp(smooth2, teachScratch[i].j2Deg - maxDeviationDeg,
+                      teachScratch[i].j2Deg + maxDeviationDeg);
+    }
+    state.taught[i].j1Deg = smooth1;
+    state.taught[i].j2Deg = smooth2;
+  }
+}
+
+function stabilizeTeachPointsXY(smoothingMs, maxDeviationDeg) {
+  if (state.taught.length < 3 || smoothingMs <= 0.0) return;
+  const teachScratch = state.rawTaught.map(point => {
+    const xy = forwardKinematics(point.j1Deg, point.j2Deg);
+    return { seconds: point.seconds, j1Deg: xy.x, j2Deg: xy.y };
+  });
+
+  for (let i = 0; i < state.taught.length; ++i) {
+    const rawX = teachScratch[i].j1Deg;
+    const rawY = teachScratch[i].j2Deg;
+    const reachMm = Math.max(Math.hypot(rawX, rawY), 20.0);
+    const maxDeviationMm = radians(maxDeviationDeg) * reachMm;
+    const windowsMs = [smoothingMs, smoothingMs * 0.5, smoothingMs * 0.25, 0.0];
+    const elbowDown = state.rawTaught[i].j2Deg - 180.0 < 0.0;
+    let solved = false;
+
+    for (let attempt = 0; attempt < windowsMs.length; ++attempt) {
+      const windowMs = windowsMs[attempt];
+      let smoothX = rawX;
+      let smoothY = rawY;
+      if (windowMs > 0.0) {
+        let sumX = 0.0;
+        let sumY = 0.0;
+        let count = 0;
+        for (let j = 0; j < state.taught.length; ++j) {
+          if (fabsf((teachScratch[j].seconds - teachScratch[i].seconds) * 1000.0) <= windowMs) {
+            sumX += teachScratch[j].j1Deg;
+            sumY += teachScratch[j].j2Deg;
+            ++count;
+          }
+        }
+        smoothX = sumX / count;
+        smoothY = sumY / count;
+      }
+      if (maxDeviationDeg > 0.0) {
+        smoothX = clamp(smoothX, rawX - maxDeviationMm, rawX + maxDeviationMm);
+        smoothY = clamp(smoothY, rawY - maxDeviationMm, rawY + maxDeviationMm);
+      }
+      const smooth = inverseKinematics(smoothX, smoothY, elbowDown);
+      if (smooth) {
+        state.taught[i].j1Deg = smooth.j1Deg;
+        state.taught[i].j2Deg = smooth.j2Deg;
+        solved = true;
+        if (attempt > 0) logLine(`XY_SMOOTH_REDUCED point=${i} window_ms=${windowsMs[attempt]}`);
+        break;
+      }
+    }
+    if (!solved) {
+      state.taught[i].j1Deg = state.rawTaught[i].j1Deg;
+      state.taught[i].j2Deg = state.rawTaught[i].j2Deg;
+      logLine(`XY_SMOOTH_FALLBACK point=${i}`);
+    }
+  }
+}
+
+function prepareTaughtPath(smoothingMs, maxDeviationDeg) {
+  state.taught = state.rawTaught.map(point => ({ ...point }));
+  if (C.XY_SMOOTHING_IMPLEMENTED) {
+    stabilizeTeachPointsXY(smoothingMs, maxDeviationDeg);
+  } else {
+    stabilizeTeachPoints(smoothingMs, maxDeviationDeg);
+  }
+  if (state.taught.length > 0) {
+    state.taught[0] = { ...state.rawTaught[0] };
+    state.taught[state.taught.length - 1] = { ...state.rawTaught[state.rawTaught.length - 1] };
+  }
+  renderTrails();
+}
+
+async function recordTeach(seconds, hz, j1Only, smoothingMs, maxDeviationDeg) {
+  if ((j1Only && state.armMode !== AxisMode.J1_ONLY) ||
+      (!j1Only && state.armMode !== AxisMode.DUAL)) {
+    logLine(state.armMode === AxisMode.J2_ONLY
+      ? "ERROR: TEACH is unavailable in ARM J2 mode"
+      : "ERROR: use ARM J1 for TEACH J1 or ARM FOLDED for TEACH");
+    return;
+  }
+  if (!state.armed || seconds <= 0.0 || seconds > 60.0 || hz < 1.0 || hz > 50.0) {
+    logLine("ERROR: TEACH needs 0-60 seconds and 1-50 Hz");
+    return;
+  }
+  const requested = Math.ceil(seconds * hz);
+  if (requested > MAX_TEACH_POINTS) {
+    logLine("ERROR: too many teach points");
+    return;
+  }
+
+  disableDrivers();
+  state.rawTaught = [];
+  state.taught = [];
+  state.taughtJ1Only = j1Only;
+  state.teaching = true;
+  state.teachCancelled = false;
+  state.teachPose = { j1Deg: currentJ1Deg(), j2Deg: currentJ2Deg() };
+  updateUI();
+  const started = performance.now();
+  const interval = Math.trunc(1000.0 / hz);
+  for (let i = 0; i < requested; ++i) {
+    const due = started + i * interval;
+    while (performance.now() < due) {
+      if (state.teachCancelled) break;
+      await sleep(Math.min(5, Math.max(1, due - performance.now())));
+    }
+    if (state.teachCancelled) break;
+    const measured = encoderJointAngles();
+    state.rawTaught.push({
+      seconds: (performance.now() - started) / 1000.0,
+      j1Deg: measured.j1Deg,
+      j2Deg: j1Only ? 180.0 : measured.j2Deg,
+    });
+    renderTrails();
+    updateUI();
+  }
+  state.teaching = false;
+  state.dragging = false;
+  state.teachPose = null;
+  if (state.teachCancelled) {
+    logLine("TEACH CANCELLED");
+    updateUI();
+    return;
+  }
+  for (let i = 1; i < state.rawTaught.length; ++i) {
+    const jumpJ1 = fabsf(state.rawTaught[i].j1Deg - state.rawTaught[i - 1].j1Deg);
+    const jumpJ2 = fabsf(state.rawTaught[i].j2Deg - state.rawTaught[i - 1].j2Deg);
+    if (jumpJ1 > 5.0 || (!j1Only && jumpJ2 > 5.0)) {
+      let line = `TEACH REJECTED: encoder jump at point ${i} J1=${fixed(jumpJ1, 2)}`;
+      if (!j1Only) line += ` J2=${fixed(jumpJ2, 2)}`;
+      logLine(line + " deg");
+      state.rawTaught = [];
+      state.taught = [];
+      updateUI();
+      return;
+    }
+  }
+  prepareTaughtPath(smoothingMs, maxDeviationDeg);
+  logLine(`TAUGHT: ${state.taught.length} points, J1 ${fixed(state.taught[0].j1Deg, 2)} -> ${fixed(state.taught[state.taught.length - 1].j1Deg, 2)}; type PLAY`);
+  printOperationReport("TEACH_COMPLETE");
+  updateUI();
+}
+
+async function replayTeach() {
+  if (state.taught.length === 0) {
+    logLine("ERROR: no taught movement");
+    return false;
+  }
+  state.armMode = state.taughtJ1Only ? AxisMode.J1_ONLY : AxisMode.DUAL;
+  const measured = encoderJointAngles();
+  state.j1PositionSteps = lroundf(measured.j1Deg * J1_STEPS_PER_DEG());
+  state.j2PositionSteps = lroundf(measured.j2Deg * J2_STEPS_PER_DEG());
+  enableDrivers();
+  state.armed = true;
+  logLine(`PLAY RETURN: J1 ${fixed(measured.j1Deg, 2)} -> ${fixed(state.taught[0].j1Deg, 2)}`);
+  if (!await moveToAngles(state.taught[0].j1Deg, state.taught[0].j2Deg, false)) {
+    disableDrivers();
+    return false;
+  }
+  for (let i = 1; i < state.taught.length; ++i) {
+    if (!await moveToAngles(state.taught[i].j1Deg, state.taught[i].j2Deg, false)) {
+      logLine(`PLAY STOPPED AT POINT ${i}/${state.taught.length - 1}`);
+      disableDrivers();
+      printOperationReport("PLAY_STOPPED");
+      return false;
+    }
+  }
+  disableDrivers();
+  logLine(`PLAYED: ${state.taught.length} points`);
+  printOperationReport("PLAY_COMPLETE");
+  return true;
+}
+
+function armAtFoldedPose(mode) {
+  disableDrivers();
+  state.j1PositionSteps = 0;
+  state.j2PositionSteps = lroundf(180.0 * J2_STEPS_PER_DEG());
+  state.trueJ1Steps = 0;
+  state.trueJ2Steps = lroundf(180.0 * J2_STEPS_PER_DEG());
+  state.encoderFault = false;
+  state.armMode = mode;
+  state.encodersCalibrated = true;
+  state.encoderMode = mode;
+  enableDrivers();
+  state.armed = true;
+  if (mode === AxisMode.J1_ONLY) {
+    logLine("ARMED J1 TEST: only J1 motion is allowed");
+  } else if (mode === AxisMode.J2_ONLY) {
+    logLine("ARMED J2 TEST: J2 homed at 180; only J2 motion is allowed");
+  } else {
+    logLine("ARMED at J1=0, J2=180; physical product buttons enabled");
+  }
+  printOperationReport("ARM_COMPLETE");
+  updateUI();
+}
+
+function printHelp() {
+  [
+    "Physical product controls after ARM FOLDED:",
+    "  Hold Start/Stop + tracer: record; release: stop",
+    "  Hold Start/Stop + cutter: cut; release: abort",
+    "  Stabilization: toggle while idle",
+    "  Repeat: repeat the last completed cut",
+    "Commands:",
+    "  ARM FOLDED | ARM J1 | ARM J2 | DISARM",
+    "  TEST J1 <steps> | TEST J2 <steps>",
+    "  J1 <deg> | J2 <deg> | ANGLES <j1> <j2>",
+    "  XY <x> <y> [UP|DOWN]",
+    "  CUT <x0> <y0> <x1> <y1> [UP|DOWN]",
+    "  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]",
+    "  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>",
+    "  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS",
+    "  PLAY | CLEAR | POS | HELP",
+  ].forEach(logLine);
+}
+
+const FLOAT = "([+-]?(?:(?:\\d+(?:\\.\\d*)?)|(?:\\.\\d+))(?:[eE][+-]?\\d+)?)";
+function scan(command, format) {
+  const parts = format.trim().split(/\s+/);
+  let pattern = "^\\s*";
+  const captures = [];
+  for (let i = 0; i < parts.length; ++i) {
+    if (i) pattern += "\\s+";
+    if (parts[i] === "%f") {
+      pattern += FLOAT;
+      captures.push("float");
+    } else if (parts[i] === "%ld") {
+      pattern += "([+-]?\\d+)";
+      captures.push("int");
+    } else if (/^%\d+s$/.test(parts[i])) {
+      const width = Number(parts[i].slice(1, -1));
+      pattern += `(\\S{1,${width}})`;
+      captures.push("string");
+    } else {
+      pattern += parts[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  const match = command.match(new RegExp(pattern));
+  if (!match) return null;
+  return captures.map((type, i) => type === "float" ? Number(match[i + 1]) :
+    type === "int" ? Math.trunc(Number(match[i + 1])) : match[i + 1]);
+}
+
+function parseElbow(text) { return text != null && text === "DOWN"; }
+
+async function handleCommand(rawCommand) {
+  let command = rawCommand.trim();
+  if (command.length === 0) return;
+  command = command.toUpperCase();
+  logLine(`> ${command}`);
+
+  if (state.busy) {
+    if (command === "DISARM") {
+      state.teachCancelled = true;
+      disableDrivers();
+      logLine("DISARMED");
+      printOperationReport("DISARMED");
+    } else {
+      logLine("ERROR: simulator is busy");
+    }
+    return;
+  }
+  state.busy = true;
+  updateUI();
+  try {
+    if (command === "HELP") return printHelp();
+    if (command === "ARM FOLDED") return armAtFoldedPose(AxisMode.DUAL);
+    if (command === "ARM J1") return armAtFoldedPose(AxisMode.J1_ONLY);
+    if (command === "ARM J2") return armAtFoldedPose(AxisMode.J2_ONLY);
+    if (command === "DISARM") {
+      disableDrivers();
+      state.armMode = AxisMode.DUAL;
+      logLine("DISARMED");
+      printOperationReport("DISARMED");
+      return;
+    }
+    if (command === "POS") return printOperationReport("POSITION");
+    if (command === "CLEAR") {
+      state.taught = [];
+      state.rawTaught = [];
+      logLine("TAUGHT MOVEMENT CLEARED");
+      renderTrails();
+      return;
+    }
+    if (command === "PLAY") return await replayTeach();
+    if (command === "FEEDBACK ON") {
+      state.encoderFeedbackEnabled = true;
+      logLine("FEEDBACK ON: correction and position faults enabled");
+      return;
+    }
+    if (command === "FEEDBACK OFF") {
+      state.encoderFeedbackEnabled = false;
+      logLine("WARNING: FEEDBACK OFF; motor motion is open-loop");
+      return;
+    }
+    if (command === "FEEDBACK STATUS") {
+      logLine(state.encoderFeedbackEnabled
+        ? "FEEDBACK ON: correction and position faults enabled"
+        : "FEEDBACK OFF: motor motion is open-loop");
+      return;
+    }
+    if (command === "STREAM ON") {
+      if (!state.encodersCalibrated) {
+        logLine("ERROR: type ARM FOLDED, ARM J1, or ARM J2 before streaming");
+      } else {
+        state.encoderStreamEnabled = true;
+        startEncoderStream();
+        logLine("ENC_STREAM ON");
+      }
+      return;
+    }
+    if (command === "STREAM OFF") {
+      state.encoderStreamEnabled = false;
+      startEncoderStream();
+      logLine("ENC_STREAM OFF");
+      return;
+    }
+    let values = scan(command, "STREAM RATE %f");
+    if (values) {
+      const streamRate = values[0];
+      if (streamRate < 1.0 || streamRate > 50.0) {
+        logLine("ERROR: STREAM RATE must be 1-50 Hz");
+      } else {
+        state.encoderStreamHz = streamRate;
+        startEncoderStream();
+        logLine(`ENC_STREAM RATE ${fixed(streamRate, 1)} Hz`);
+      }
+      return;
+    }
+    if (command === "ENC") {
+      let line = "ENC J1=[found=YES magnet=OK] J2=[found=YES magnet=OK]";
+      if (state.encodersCalibrated) {
+        const enc = encoderJointAngles();
+        line += ` J1=${fixed(enc.j1Deg, 2)} J2=${fixed(enc.j2Deg, 2)}`;
+      } else {
+        line += " angles=UNCALIBRATED";
+      }
+      logLine(line);
+      return;
+    }
+
+    values = scan(command, "ANGLES %f %f");
+    if (values) return await moveToAngles(values[0], values[1]);
+    values = scan(command, "J1 %f");
+    if (values) return await moveToAngles(values[0], currentJ2Deg());
+    values = scan(command, "J2 %f");
+    if (values) return await moveToAngles(currentJ1Deg(), values[0]);
+    values = scan(command, "XY %f %f %7s") || scan(command, "XY %f %f");
+    if (values) {
+      if (!state.armed || state.armMode !== AxisMode.DUAL) {
+        logLine("ERROR: XY requires ARM FOLDED");
+      } else if (await moveToXY(values[0], values[1], values.length === 3 && parseElbow(values[2]))) {
+        printOperationReport("POSITION");
+      }
+      return;
+    }
+    values = scan(command, "CUT %f %f %f %f %7s") || scan(command, "CUT %f %f %f %f");
+    if (values) {
+      if (!state.armed || state.armMode !== AxisMode.DUAL) {
+        logLine("ERROR: CUT requires ARM FOLDED");
+      } else {
+        await cutLine(values[0], values[1], values[2], values[3],
+                      values.length === 5 && parseElbow(values[4]));
+      }
+      return;
+    }
+
+    values = scan(command, "TEST %2s %ld");
+    if (values) {
+      const [axis, rawSteps] = values;
+      if (!state.armed) {
+        logLine("ERROR: type ARM FOLDED first");
+      } else if (axis === "J1" && state.armMode !== AxisMode.J2_ONLY) {
+        await executeSteps(rawSteps, 0);
+        logLine("OK");
+        printOperationReport("TEST_J1_COMPLETE");
+      } else if (axis === "J2" && state.armMode !== AxisMode.J1_ONLY) {
+        await executeSteps(0, rawSteps);
+        logLine("OK");
+        printOperationReport("TEST_J2_COMPLETE");
+      } else {
+        logLine("ERROR: invalid or blocked test axis");
+      }
+      return;
+    }
+
+    values = scan(command, "TEACH J1 %f %f %f %f") ||
+             scan(command, "TEACH J1 %f %f %f") ||
+             scan(command, "TEACH J1 %f %f") ||
+             scan(command, "TEACH J1 %f");
+    if (values) {
+      return await recordTeach(values[0], values[1] ?? 20.0, true,
+                               values[2] ?? 150.0, values[3] ?? 1.0);
+    }
+    values = scan(command, "TEACH %f %f %f %f") ||
+             scan(command, "TEACH %f %f %f") ||
+             scan(command, "TEACH %f %f") ||
+             scan(command, "TEACH %f");
+    if (values) {
+      return await recordTeach(values[0], values[1] ?? 20.0, false,
+                               values[2] ?? 150.0, values[3] ?? 1.0);
+    }
+    logLine("ERROR: unknown command; type HELP");
+  } finally {
+    state.busy = false;
+    updateUI();
+  }
+}
+
+function startEncoderStream() {
+  clearInterval(state.encoderStreamTimer);
+  state.encoderStreamTimer = null;
+  if (!state.encoderStreamEnabled || !state.encodersCalibrated) return;
+  state.encoderStreamTimer = setInterval(() => {
+    const enc = encoderJointAngles();
+    let line = "ENC_STREAM";
+    if (state.encoderMode !== AxisMode.J2_ONLY) {
+      line += ` J1=${fixed(enc.j1Deg, 2)} RAW1=${simulatedRaw(enc.j1Deg, 1)}`;
+    }
+    if (state.encoderMode !== AxisMode.J1_ONLY) {
+      line += ` J2=${fixed(enc.j2Deg, 2)} RAW2=${simulatedRaw(enc.j2Deg, 2)}`;
+    }
+    logLine(line);
+  }, Math.trunc(1000.0 / state.encoderStreamHz));
+}
+
+function renderGrid() {
+  const grid = $("grid");
+  let markup = "";
+  for (let value = -400; value <= 400; value += 100) {
+    if (value === 0) continue;
+    markup += `<line class="grid-line" x1="${value}" y1="-440" x2="${value}" y2="440"></line>`;
+    markup += `<line class="grid-line" x1="-440" y1="${value}" x2="440" y2="${value}"></line>`;
+  }
+  grid.innerHTML = markup;
+}
+
+function displayedPose() {
+  return state.teaching && state.teachPose
+    ? state.teachPose
+    : { j1Deg: trueJ1Deg(), j2Deg: trueJ2Deg() };
+}
+
+function renderArm() {
+  const pose = displayedPose();
+  const t1 = radians(pose.j1Deg);
+  const elbowX = C.LINK_1_MM * Math.sin(t1);
+  const elbowY = C.LINK_1_MM * Math.cos(t1);
+  const tip = forwardKinematics(pose.j1Deg, pose.j2Deg);
+  $("link1").setAttribute("x2", elbowX);
+  $("link1").setAttribute("y2", elbowY);
+  $("link2").setAttribute("x1", elbowX);
+  $("link2").setAttribute("y1", elbowY);
+  $("link2").setAttribute("x2", tip.x);
+  $("link2").setAttribute("y2", tip.y);
+  $("elbow").setAttribute("cx", elbowX);
+  $("elbow").setAttribute("cy", elbowY);
+  $("effector").setAttribute("cx", tip.x);
+  $("effector").setAttribute("cy", tip.y);
+  $("workspaceOuter").setAttribute("r", C.LINK_1_MM + C.LINK_2_MM);
+  $("workspaceInner").setAttribute("r", Math.abs(C.LINK_1_MM - C.LINK_2_MM));
+  $("poseReadout").textContent =
+    `TRUE  J1 ${fixed(pose.j1Deg, 2)}°  J2 ${fixed(pose.j2Deg, 2)}°\n` +
+    `XY    X ${fixed(tip.x, 1)}  Y ${fixed(tip.y, 1)} mm`;
+  const enc = encoderJointAngles();
+  $("encoderReadout").textContent =
+    `ENC   J1 ${fixed(enc.j1Deg, 2)}°  J2 ${fixed(enc.j2Deg, 2)}°\n` +
+    `OFFSET ${fixed(state.encoderOffsetJ1, 2)}° / ${fixed(state.encoderOffsetJ2, 2)}°`;
+}
+
+function renderTrails() {
+  const pointsFor = points => points.map(point => {
+    const xy = forwardKinematics(point.j1Deg, point.j2Deg);
+    return `${xy.x},${xy.y}`;
+  }).join(" ");
+  $("rawTrail").setAttribute("points", pointsFor(state.rawTaught));
+  $("trail").setAttribute("points", pointsFor(state.taught));
+}
+
+function updateTelemetry() {
+  $("mJ1Steps").textContent = state.j1PositionSteps.toLocaleString();
+  $("mJ2Steps").textContent = state.j2PositionSteps.toLocaleString();
+  $("mDirJ1").textContent = state.lastDirectionJ1 ? "HIGH" : "LOW";
+  $("mDirJ2").textContent = state.lastDirectionJ2 ? "HIGH" : "LOW";
+  $("mCorrections").textContent = String(state.correctionCount);
+  $("mFeedback").textContent = state.encoderFeedbackEnabled ? "ON" : "OFF";
+  $("mBranch").textContent = state.elbowDown ? "DOWN" : "UP";
+  $("mPulse").textContent = state.lastPulse;
+}
+
+function updateUI() {
+  $("statusState").textContent = state.teaching ? "TEACHING" :
+    state.busy ? "RUNNING" : state.armed ? "ARMED" : state.encoderFault ? "FAULT" : "DISARMED";
+  $("statusMode").textContent = state.armMode.replace("_ONLY", "");
+  $("statusPoints").textContent = String(state.taught.length || state.rawTaught.length);
+  $("teachCallout").classList.toggle("show", state.teaching);
+  $("armSvg").classList.toggle("teaching", state.teaching);
+  $("armSvg").classList.toggle("dragging", state.dragging);
+  document.querySelectorAll("[data-command]").forEach(button => {
+    button.disabled = state.busy && button.dataset.command !== "DISARM";
+  });
+  renderArm();
+  updateTelemetry();
+}
+
+function svgPoint(event) {
+  const svg = $("armSvg");
+  const point = svg.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  const transformed = point.matrixTransform(svg.getScreenCTM().inverse());
+  return { x: transformed.x, y: -transformed.y };
+}
+
+function updateTeachPose(event) {
+  if (!state.teaching) return;
+  const point = svgPoint(event);
+  const up = inverseKinematics(point.x, point.y, false);
+  const down = inverseKinematics(point.x, point.y, true);
+  let chosen = null;
+  if (up && down && state.teachPose) {
+    const upDistance = Math.abs(up.j1Deg - state.teachPose.j1Deg) + Math.abs(up.j2Deg - state.teachPose.j2Deg);
+    const downDistance = Math.abs(down.j1Deg - state.teachPose.j1Deg) + Math.abs(down.j2Deg - state.teachPose.j2Deg);
+    chosen = upDistance <= downDistance ? up : down;
+  } else {
+    chosen = up || down;
+  }
+  if (chosen) {
+    state.teachPose = chosen;
+    state.elbowDown = chosen.j2Deg < 0;
+    renderArm();
+  }
+}
+
+function makeConstantInputs() {
+  const specs = [
+    ["Mechanical"],
+    ["J1_GEAR_RATIO", "number"], ["J2_GEAR_RATIO", "number"],
+    ["LINK_1_MM", "number"], ["LINK_2_MM", "number"],
+    ["J1_STEPS_PER_DEG", "derived"], ["J2_STEPS_PER_DEG", "derived"],
+    ["Software limits"],
+    ["J1_MIN_DEG", "number"], ["J1_MAX_DEG", "number"],
+    ["J2_MIN_DEG", "number"], ["J2_MAX_DEG", "number"],
+    ["Direction and encoder signs"],
+    ["INVERT_J1", "bool"], ["INVERT_J2", "bool"],
+    ["ENCODER_J1_SIGN", "number"], ["ENCODER_J2_SIGN", "number"],
+    ["Feedback"],
+    ["FEEDBACK_TOLERANCE_DEG", "number"], ["FEEDBACK_MAX_ERROR_DEG", "number"],
+    ["FEEDBACK_MAX_CORRECTIONS", "number"],
+    ["Teaching and stabilization"],
+    ["PRODUCT_TEACH_HZ", "number"], ["PRODUCT_SMOOTHING_MS", "number"],
+    ["PRODUCT_MAX_DEVIATION_DEG", "number"], ["XY_SMOOTHING_IMPLEMENTED", "bool"],
+    ["Simulated encoder fault injection"],
+    ["ENCODER_J1_OFFSET_DEG", "offset1"], ["ENCODER_J2_OFFSET_DEG", "offset2"],
+  ];
+  const grid = $("constantGrid");
+  for (const [name, type] of specs) {
+    if (!type) {
+      const heading = document.createElement("div");
+      heading.className = "section-label";
+      heading.textContent = name;
+      grid.appendChild(heading);
+      continue;
+    }
+    const label = document.createElement("label");
+    label.className = type === "bool" ? "switch-field" : "";
+    const span = document.createElement("span");
+    span.textContent = name;
+    span.title = name;
+    const input = document.createElement("input");
+    input.id = `const_${name}`;
+    if (type === "bool") {
+      input.type = "checkbox";
+      input.checked = Boolean(C[name]);
+    } else if (type === "derived") {
+      input.type = "text";
+      input.readOnly = true;
+    } else {
+      input.type = "number";
+      input.step = "any";
+      input.value = type === "offset1" ? state.encoderOffsetJ1 :
+                    type === "offset2" ? state.encoderOffsetJ2 : C[name];
+    }
+    input.addEventListener("change", () => {
+      if (type === "bool") C[name] = input.checked;
+      else if (type === "offset1") state.encoderOffsetJ1 = Number(input.value);
+      else if (type === "offset2") state.encoderOffsetJ2 = Number(input.value);
+      else if (type !== "derived" && Number.isFinite(Number(input.value))) C[name] = Number(input.value);
+      refreshDerivedInputs();
+      renderTrails();
+      updateUI();
+    });
+    label.append(span, input);
+    grid.appendChild(label);
+  }
+  refreshDerivedInputs();
+}
+
+function refreshDerivedInputs() {
+  $("const_J1_STEPS_PER_DEG").value = fixed(J1_STEPS_PER_DEG(), 6);
+  $("const_J2_STEPS_PER_DEG").value = fixed(J2_STEPS_PER_DEG(), 6);
+}
+
+function initialize() {
+  state.j2PositionSteps = lroundf(180.0 * J2_STEPS_PER_DEG());
+  state.trueJ2Steps = lroundf(180.0 * J2_STEPS_PER_DEG());
+  renderGrid();
+  makeConstantInputs();
+  $("sendButton").addEventListener("click", () => {
+    const value = $("commandInput").value;
+    $("commandInput").value = "";
+    handleCommand(value);
+  });
+  $("commandInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("sendButton").click();
+    }
+  });
+  document.querySelectorAll("[data-command]").forEach(button => {
+    button.addEventListener("click", () => handleCommand(button.dataset.command));
+  });
+  $("clearLog").addEventListener("click", () => { $("log").textContent = ""; });
+  $("effector").addEventListener("pointerdown", event => {
+    if (!state.teaching) return;
+    state.dragging = true;
+    $("effector").setPointerCapture(event.pointerId);
+    updateTeachPose(event);
+    updateUI();
+  });
+  $("effector").addEventListener("pointermove", event => {
+    if (state.dragging) updateTeachPose(event);
+  });
+  $("effector").addEventListener("pointerup", event => {
+    state.dragging = false;
+    try { $("effector").releasePointerCapture(event.pointerId); } catch (_) {}
+    updateUI();
+  });
+  $("effector").addEventListener("pointercancel", () => {
+    state.dragging = false;
+    updateUI();
+  });
+
+  logLine("SwivelCut Arduino controller ready");
+  logLine("Fold the arm, then type ARM FOLDED");
+  logLine("During TEACH, drag the end-effector point.");
+  logLine("Type HELP for the firmware command list.");
+  updateUI();
+}
+
+initialize();
+</script>
+</body>
+</html>
