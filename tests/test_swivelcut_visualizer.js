@@ -9,117 +9,126 @@ const elements = new Map();
 function element(id) {
   if (!elements.has(id)) {
     elements.set(id, {
-      value: "",
-      style: {},
-      classList: { add() {}, remove() {} },
-      addEventListener() {},
-      querySelectorAll() { return []; },
+      value: id === "scale" ? "1" : "0",
+      checked: id === "flipY",
+      disabled: false,
+      className: "",
       textContent: "",
       innerHTML: "",
-      getBoundingClientRect() { return { width: 800, height: 600 }; },
+      style: {},
+      addEventListener() {},
+      replaceChildren() {},
+      appendChild() {},
+      querySelector() { return null; },
     });
   }
   return elements.get(id);
 }
-
-const context2d = new Proxy(
-  {},
-  {
-    get(target, key) {
-      if (!(key in target)) target[key] = () => {};
-      return target[key];
-    },
-    set(target, key, value) {
-      target[key] = value;
-      return true;
-    },
-  }
-);
-element("cv").getContext = () => context2d;
+element("elbow").value = "UP";
 
 const sandbox = {
   console,
+  assert,
   document: {
-    documentElement: {},
     getElementById: element,
+    execCommand() {},
   },
-  window: {
-    devicePixelRatio: 1,
-    addEventListener() {},
-    getComputedStyle() {
-      return { getPropertyValue: () => "#000" };
-    },
-  },
-  ResizeObserver: class {
-    observe() {}
-  },
-  requestAnimationFrame() { return 1; },
-  performance: { now: () => 0 },
+  navigator: { clipboard: { async writeText() {} } },
+  setTimeout() {},
 };
 vm.createContext(sandbox);
 
 const tests = `
-S.L1=200; S.L2=200;
-let straight=forward(0,0);
-assert.ok(Math.abs(straight[0]) < 1e-9);
-assert.ok(Math.abs(straight[1]-400) < 1e-9);
-let elbowStraight=elbowPosition(0);
-assert.ok(Math.abs(elbowStraight[0]) < 1e-9);
-assert.ok(Math.abs(elbowStraight[1]-200) < 1e-9);
-let elbowRight=elbowPosition(Math.PI/2);
-assert.ok(Math.abs(elbowRight[0]-200) < 1e-9);
-assert.ok(Math.abs(elbowRight[1]) < 1e-9);
-let straightIK=inverse(0,400,"up");
-assert.ok(Math.abs(straightIK[0]) < 1e-9);
-assert.ok(Math.abs(straightIK[1]) < 1e-9);
-assert.strictEqual(normalizeAngle(Math.PI), Math.PI);
-assert.ok(Math.abs(Math.abs(normalizeAngle(3*Math.PI))-Math.PI) < 1e-9);
+assert.strictEqual(LINK_1_MM, 200);
+assert.strictEqual(LINK_2_MM, 200);
+assert.strictEqual(MAX_TEACH_POINTS, 3000);
 
-S.L1=500; S.L2=100;
-assert.strictEqual(lineReachable(600,0,-600,0), false);
-assert.strictEqual(lineReachable(600,0,500,0), true);
+let straight = forwardKinematics(0, 0);
+assert.ok(Math.abs(straight.x) < 1e-9);
+assert.ok(Math.abs(straight.y - 400) < 1e-9);
+let folded = forwardKinematics(0, 180);
+assert.ok(Math.abs(folded.x) < 1e-9);
+assert.ok(Math.abs(folded.y) < 1e-9);
 
-S.L1=200; S.L2=200; S.g1=6; S.g2=9; S.spr=200; S.micro=32;
-S.cur={t1:10*D2R,t2:120*D2R};
-$("tx").value="200"; $("ty").value="100";
-S.command="xyj1"; S.elbow="up";
-let j1Only=commandTarget();
-assert.strictEqual(j1Only.ok,true);
-assert.ok(Math.abs(j1Only.t2-S.cur.t2)<1e-12);
-assert.strictEqual(j1Only.x,200);
-assert.strictEqual(j1Only.y,100);
-S.command="xyj2";
-let j2Only=commandTarget();
-assert.strictEqual(j2Only.ok,true);
-assert.ok(Math.abs(j2Only.t1-S.cur.t1)<1e-12);
+let up = inverseKinematics(200, 200, false);
+assert.ok(up);
+assert.ok(Math.abs(up.j1Deg) < 1e-9);
+assert.ok(Math.abs(up.j2Deg - 90) < 1e-9);
+let down = inverseKinematics(200, 200, true);
+assert.ok(down);
+assert.ok(Math.abs(down.j1Deg - 90) < 1e-9);
+assert.ok(Math.abs(down.j2Deg + 90) < 1e-9);
 
-S.cur={t1:0,t2:Math.PI}; S.command="cut";
-$("x0").value="0"; $("y0").value="20"; $("x1").value="0"; $("y1").value="400";
-let foldedCut=commandTarget();
-assert.strictEqual(foldedCut.ok,false);
-assert.ok(foldedCut.error.includes("unfold"));
-S.cur={t1:-40.945*D2R,t2:171.89*D2R};
-let validCut=commandTarget();
-assert.strictEqual(validCut.ok,true);
-assert.ok(cutSolutions(0,20,0,400,"up").length>2);
+let far = inverseKinematicsDetailed(401, 0, false);
+assert.strictEqual(far.ok, false);
+assert.strictEqual(far.type, "annulus");
+assert.ok(far.reason.includes("too far"));
+let limited = inverseKinematicsDetailed(-300, 0, false);
+assert.strictEqual(limited.ok, false);
+assert.strictEqual(limited.type, "joint-limit");
+assert.ok(limited.reason.includes("J1"));
 
-S.coupling=0.25;
-S.cur={t1:-179.9*D2R,t2:20*D2R};
-S.cmd={t1:-179.8*D2R,t2:21*D2R,ok:true,x:0,y:0,error:""};
-updateTelemetry();
-const expectedJ1=pyRound(S.cmd.t1*stepsPerRad(S.g1))
-  -pyRound(S.cur.t1*stepsPerRad(S.g1));
-assert.strictEqual($("o_s1").textContent, expectedJ1.toLocaleString());
-const expectedJ2=pyRound(
-  (S.cmd.t2+S.coupling*S.cmd.t1)*stepsPerRad(S.g2)
-)-pyRound(
-  (S.cur.t2+S.coupling*S.cur.t1)*stepsPerRad(S.g2)
+let mapped = transformPoint({x:10,y:20}, {
+  scale:2, offsetX:5, offsetY:7, flipY:true, elbowDown:false
+});
+assert.deepStrictEqual(mapped, {x:25,y:-33});
+
+let transformed = transformedSvgPoint({
+  getCTM() { return {a:2,b:0,c:0,d:3,e:5,f:7}; },
+  ownerSVGElement: null
+}, {x:10,y:20});
+assert.deepStrictEqual(transformed, {x:25,y:67});
+
+let relative = elementMatrixInSvg({
+  getCTM() { return {a:4,b:0,c:0,d:6,e:15,f:27}; },
+  ownerSVGElement: {
+    getCTM() { return {a:2,b:0,c:0,d:3,e:5,f:6}; }
+  }
+});
+assert.deepStrictEqual(relative, {a:2,b:0,c:0,d:2,e:5,f:7});
+
+let flat = flattenSequences([
+  {points:[{x:1,y:2},{x:3,y:4}]},
+  {points:[{x:5,y:6}]}
+]);
+assert.strictEqual(flat.length, 3);
+assert.strictEqual(flat[2].sequenceIndex, 1);
+
+let validation = validatePoints([
+  {x:200,y:200,sequenceIndex:0,pointIndex:0},
+  {x:0,y:400,sequenceIndex:0,pointIndex:1}
+], false);
+assert.strictEqual(validation.allReachable, true);
+let output = generateLoadPointsPackage(validation);
+assert.ok(output.startsWith("LOAD POINTS 2\\n"));
+assert.strictEqual(output.split("\\n").length, 3);
+
+let invalid = validatePoints([
+  {x:200,y:200,sequenceIndex:0,pointIndex:0},
+  {x:401,y:0,sequenceIndex:0,pointIndex:1}
+], false);
+assert.strictEqual(invalid.allReachable, false);
+assert.strictEqual(invalid.firstFailure.index, 1);
+assert.strictEqual(generateLoadPointsPackage(invalid), "");
+
+let split = splitDiscontinuousSubpaths([
+  {x:0,y:0},{x:2,y:0},{x:100,y:100},{x:102,y:100}
+], 2);
+assert.strictEqual(split.length, 2);
+assert.strictEqual(split[0].length, 2);
+assert.strictEqual(split[1].length, 2);
+
+let records = splitPathDataRecords([
+  {type:"M",values:[0,0]}, {type:"L",values:[10,0]},
+  {type:"M",values:[20,20]}, {type:"C",values:[21,20,22,20,23,20]}
+]);
+assert.strictEqual(records.length, 2);
+assert.strictEqual(records[1][0].type, "M");
+assert.strictEqual(
+  serializePathData(records[0]),
+  "M 0 0 L 10 0"
 );
-assert.strictEqual($("o_s2").textContent, expectedJ2.toLocaleString());
-assert.strictEqual(pyRound(2.5),2);
-assert.strictEqual(pyRound(3.5),4);
-assert.strictEqual(pyRound(-2.5),-2);
 `;
 
-vm.runInContext(`${script}\n${tests}`, vm.createContext({ ...sandbox, assert }));
-console.log("visualizer tests: OK");
+vm.runInContext(`${script}\n${tests}`, sandbox);
+console.log("SVG path planner tests: OK");

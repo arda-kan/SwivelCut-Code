@@ -1,553 +1,894 @@
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SwivelCut Motion Visualizer</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --bg:#070b0c; --panel:#0d1315; --panel2:#11191b; --edge:#1d2a2d;
-    --grid:rgba(120,200,200,.06); --grid2:rgba(120,200,200,.13);
-    --txt:#d3e6e6; --dim:#6d8489; --faint:#3f5256;
-    --amber:#ffb000; --cyan:#33e3cf; --red:#ff6b7d; --violet:#9d8cff;
-    --link1:#ffb000; --link2:#33e3cf; --target:#ff6b7d; --ghost:#5d7d80;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
-  body{
-    background:
-      radial-gradient(1200px 700px at 78% -8%, rgba(51,227,207,.06), transparent 60%),
-      radial-gradient(900px 600px at 10% 110%, rgba(255,176,0,.05), transparent 55%),
-      var(--bg);
-    color:var(--txt); font-family:"JetBrains Mono",monospace;
-    -webkit-font-smoothing:antialiased;
-  }
-  .wrap{display:grid;grid-template-columns:340px 1fr;gap:18px;min-height:100%;
-        padding:18px;max-width:1500px;margin:0 auto}
-  @media(max-width:880px){.wrap{grid-template-columns:1fr}}
-
-  /* Header */
-  .head{grid-column:1/-1;display:flex;align-items:baseline;gap:14px;
-        border-bottom:1px solid var(--edge);padding-bottom:12px;flex-wrap:wrap}
-  .head h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:800;
-           font-size:26px;margin:0;letter-spacing:-.5px}
-  .head h1 b{color:var(--amber)}
-  .head .sub{color:var(--dim);font-size:11.5px;letter-spacing:.5px;margin-left:auto;
-             text-transform:uppercase}
-  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;
-       background:var(--cyan);box-shadow:0 0 8px var(--cyan);margin-right:6px;
-       animation:pulse 2.4s infinite}
-  @keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
-
-  /* Controls */
-  .panel{background:linear-gradient(180deg,var(--panel),var(--panel2));
-         border:1px solid var(--edge);border-radius:12px;padding:14px}
-  .controls{display:flex;flex-direction:column;gap:14px}
-  .grp{border:1px solid var(--edge);border-radius:10px;padding:11px 12px 13px;
-       background:rgba(0,0,0,.18)}
-  .grp h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;
-          font-size:11px;letter-spacing:2px;text-transform:uppercase;
-          color:var(--dim);margin:0 0 10px}
-  .row{display:flex;gap:8px}
-  .field{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
-  .field label{font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase}
-  .field input,.field select{
-    width:100%;background:#060a0b;color:var(--txt);border:1px solid var(--edge);
-    border-radius:7px;padding:7px 8px;font-family:"JetBrains Mono",monospace;
-    font-size:13px;outline:none}
-  .field input:focus,.field select:focus{border-color:var(--cyan);
-    box-shadow:0 0 0 2px rgba(51,227,207,.12)}
-
-  /* Toggle buttons */
-  .seg{display:flex;border:1px solid var(--edge);border-radius:8px;overflow:hidden}
-  .seg button{flex:1;background:transparent;color:var(--dim);border:0;
-    padding:8px 4px;font-family:"JetBrains Mono",monospace;font-size:11.5px;
-    cursor:pointer;letter-spacing:.4px;transition:.14s}
-  .seg button+button{border-left:1px solid var(--edge)}
-  .seg button.on{background:var(--amber);color:#161000;font-weight:700}
-  .seg.cy button.on{background:var(--cyan);color:#00201d}
-
-  .go{width:100%;margin-top:2px;background:var(--amber);color:#161000;border:0;
-      border-radius:9px;padding:12px;font-family:"Bricolage Grotesque",sans-serif;
-      font-weight:800;font-size:14px;letter-spacing:.6px;cursor:pointer;
-      transition:.14s;text-transform:uppercase}
-  .go:hover{filter:brightness(1.08)}
-  .go:active{transform:translateY(1px)}
-  .go.busy{background:var(--faint);color:var(--dim);cursor:default}
-  .ghostbtn{background:transparent;color:var(--dim);border:1px solid var(--edge);
-      border-radius:9px;padding:10px;font-family:"JetBrains Mono",monospace;
-      font-size:12px;cursor:pointer;width:100%;margin-top:8px}
-  .ghostbtn:hover{border-color:var(--cyan);color:var(--txt)}
-
-  /* Canvas */
-  .stage{position:relative;border:1px solid var(--edge);border-radius:12px;
-         background:#050809;overflow:hidden;min-height:440px}
-  canvas{display:block;width:100%;height:100%}
-  .badge{position:absolute;top:12px;left:14px;font-size:11px;letter-spacing:1px;
-         color:var(--dim);text-transform:uppercase}
-  .err{position:absolute;top:12px;right:14px;font-size:11px;letter-spacing:1px;
-       color:var(--red);text-transform:uppercase;display:none}
-
-  /* Readout */
-  .telem{grid-column:1/-1;display:grid;
-         grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-  .cell{background:linear-gradient(180deg,var(--panel),var(--panel2));
-        border:1px solid var(--edge);border-radius:10px;padding:11px 13px}
-  .cell .k{font-size:9.5px;letter-spacing:1.3px;color:var(--dim);text-transform:uppercase}
-  .cell .v{font-size:21px;font-weight:700;margin-top:3px;letter-spacing:-.3px}
-  .cell .u{font-size:11px;color:var(--dim);margin-left:3px;font-weight:400}
-  .v.a{color:var(--amber)} .v.c{color:var(--cyan)} .v.t{color:var(--txt)}
-  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--dim);
-          margin-top:2px}
-  .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;
-            margin-right:6px;vertical-align:middle}
-</style>
-
-<div class="wrap">
-  <div class="head">
-    <h1>SWIVEL<b>·</b>CUT</h1>
-    <span style="color:var(--dim);font-size:12px">2-DOF planar motion visualizer</span>
-    <span class="sub"><span class="dot"></span>cardboard cutter · joint-space &amp; IK</span>
-  </div>
-
-  <!-- Controls -->
-  <div class="panel controls">
-    <div class="grp">
-      <h2>Fixed machine</h2>
-      <div class="row">
-        <div class="field"><label>Links</label><input value="200 / 200 mm" disabled></div>
-        <div class="field"><label>Ratios</label><input value="6:1 / 9:1" disabled></div>
-      </div>
-      <div class="row" style="margin-top:9px">
-        <div class="field"><label>Motors</label><input value="200 steps/rev" disabled></div>
-        <div class="field"><label>TB6600</label><input value="1/32 microstep" disabled></div>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SwivelCut SVG Path Planner</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0d12;
+      --panel: #121821;
+      --panel-2: #0d131b;
+      --line: #283342;
+      --text: #e9eef5;
+      --muted: #91a0b3;
+      --cyan: #56d8d0;
+      --orange: #ffad66;
+      --green: #76d99b;
+      --red: #ff6875;
+      --blue: #73a7ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(86,216,208,.10), transparent 34%),
+        radial-gradient(circle at 92% 10%, rgba(255,173,102,.08), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select, textarea { font: inherit; }
+    button, input, select, textarea {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #0a1017;
+      color: var(--text);
+    }
+    button {
+      padding: 9px 12px;
+      cursor: pointer;
+      background: #18212d;
+    }
+    button:hover:not(:disabled) { border-color: #52657c; }
+    button:disabled { opacity: .42; cursor: not-allowed; }
+    button.primary {
+      background: var(--cyan);
+      border-color: var(--cyan);
+      color: #051313;
+      font-weight: 750;
+    }
+    input, select { width: 100%; padding: 8px 9px; }
+    input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--cyan); }
+    code, textarea, .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .app { max-width: 1580px; margin: 0 auto; padding: 22px; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 20px;
+      margin-bottom: 17px;
+    }
+    h1 { margin: 0; font-size: clamp(27px, 3vw, 42px); letter-spacing: -.04em; }
+    h2 { margin: 0; font-size: 13px; letter-spacing: .11em; text-transform: uppercase; }
+    .subtitle { max-width: 790px; color: var(--muted); margin-top: 5px; }
+    .badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+    .badge {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 10px;
+      color: var(--muted);
+      background: rgba(18,24,33,.92);
+      white-space: nowrap;
+    }
+    .badge strong { color: var(--text); }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(390px, .85fr) minmax(560px, 1.4fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .stack { display: grid; gap: 16px; }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      overflow: hidden;
+      background: rgba(18,24,33,.95);
+      box-shadow: 0 18px 50px rgba(0,0,0,.26);
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--line);
+    }
+    .hint, .note { color: var(--muted); font-size: 12px; }
+    .body { padding: 15px; }
+    .fields { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+    .field { display: grid; gap: 5px; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { color: #c1ccd9; font-size: 12px; }
+    .checkbox {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 39px;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #0a1017;
+    }
+    .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .status {
+      margin-top: 13px;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--panel-2);
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .status.good { border-color: rgba(118,217,155,.48); color: #bff4d1; }
+    .status.bad { border-color: rgba(255,104,117,.52); color: #ffc0c6; }
+    .preview-wrap { position: relative; min-height: 610px; background: #080d13; }
+    #preview {
+      display: block;
+      width: 100%;
+      height: 650px;
+      background:
+        linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    .preview-key {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      pointer-events: none;
+    }
+    .key {
+      border: 1px solid rgba(255,255,255,.10);
+      border-radius: 999px;
+      padding: 5px 8px;
+      background: rgba(5,8,12,.78);
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .swatch { display: inline-block; width: 12px; height: 3px; margin-right: 5px; vertical-align: middle; }
+    .sequence-list {
+      display: grid;
+      gap: 7px;
+      max-height: 240px;
+      overflow: auto;
+    }
+    .sequence {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+    }
+    .sequence i { width: 10px; height: 10px; border-radius: 50%; }
+    textarea {
+      width: 100%;
+      min-height: 280px;
+      padding: 11px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+    .warning { color: var(--orange); }
+    .roundtrip {
+      padding: 13px 15px;
+      border-left: 3px solid var(--blue);
+      background: rgba(115,167,255,.07);
+      color: #c6d7f2;
+      font-size: 12px;
+    }
+    #svgHost {
+      position: fixed;
+      left: -100000px;
+      top: -100000px;
+      width: 1000px;
+      height: 1000px;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    @media (max-width: 1050px) {
+      .layout { grid-template-columns: 1fr; }
+      .preview-wrap { min-height: 500px; }
+      #preview { height: 560px; }
+    }
+    @media (max-width: 620px) {
+      .app { padding: 12px; }
+      header { align-items: start; flex-direction: column; }
+      .badges { justify-content: flex-start; }
+      .fields { grid-template-columns: 1fr; }
+      .field.full { grid-column: 1; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>SwivelCut SVG Path Planner</h1>
+      <div class="subtitle">
+        Flatten native SVG geometry, map it into the 200 mm + 200 mm arm
+        workspace, validate every point with the firmware IK, and generate a
+        serial-ready <code>LOAD POINTS</code> package.
       </div>
     </div>
-
-    <div class="grp">
-      <h2>Serial motion command</h2>
-      <div class="field">
-        <label>Command</label>
-        <select id="command">
-          <option value="xy">XY - move both joints to a tip position</option>
-          <option value="xyj1">XYJ1 - solve XY, move only J1</option>
-          <option value="xyj2">XYJ2 - solve XY, move only J2</option>
-          <option value="angles">ANGLES - set both joint angles</option>
-          <option value="j1">J1 - set shoulder angle</option>
-          <option value="j2">J2 - set elbow angle</option>
-          <option value="cut">CUT - move to start, then cut a line</option>
-        </select>
-      </div>
-      <div class="row" id="xyInputs" style="margin-top:10px">
-        <div class="field"><label>X sideways / right (mm)</label><input id="tx" type="number" value="0" step="5"></div>
-        <div class="field"><label>Y forward (mm)</label><input id="ty" type="number" value="300" step="5"></div>
-      </div>
-      <div class="row" id="angleInputs" style="display:none;margin-top:10px">
-        <div class="field" id="t1Field"><label>J1 shoulder (deg)</label><input id="tt1" type="number" value="0" step="1"></div>
-        <div class="field" id="t2Field"><label>J2 elbow (deg)</label><input id="tt2" type="number" value="90" step="1"></div>
-      </div>
-      <div id="cutInputs" style="display:none;margin-top:10px">
-        <div class="row">
-          <div class="field"><label>Start X0 (mm)</label><input id="x0" type="number" value="0" step="5"></div>
-          <div class="field"><label>Start Y0 (mm)</label><input id="y0" type="number" value="20" step="5"></div>
-        </div>
-        <div class="row" style="margin-top:9px">
-          <div class="field"><label>End X1 (mm)</label><input id="x1" type="number" value="0" step="5"></div>
-          <div class="field"><label>End Y1 (mm)</label><input id="y1" type="number" value="400" step="5"></div>
-        </div>
-      </div>
-      <div id="elbowControls" style="margin-top:10px">
-        <label style="font-size:10px;letter-spacing:.6px;color:var(--dim);text-transform:uppercase">Elbow solution</label>
-        <div class="seg cy" id="elbowSeg" style="margin-top:5px">
-          <button data-e="up" class="on">UP</button>
-          <button data-e="down">DOWN</button>
-        </div>
-      </div>
+    <div class="badges">
+      <div class="badge">Sequences <strong id="sequenceCount">0</strong></div>
+      <div class="badge">Points <strong id="pointCount">0</strong></div>
+      <div class="badge">Validation <strong id="validationBadge">NOT RUN</strong></div>
     </div>
+  </header>
 
-    <div class="grp">
-      <h2>Simulation</h2>
-      <div class="field"><label>Equivalent serial input</label><input id="serialPreview" value="XY 0 300 UP" disabled></div>
-      <button class="go" id="go">Execute command</button>
-      <button class="ghostbtn" id="home">⤺ Reset simulation to folded start</button>
-    </div>
-  </div>
+  <main class="layout">
+    <section class="stack">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>1. SVG Input</h2>
+          <span class="hint">Native SVG DOM sampling</span>
+        </div>
+        <div class="body">
+          <div class="fields">
+            <div class="field full">
+              <label for="svgFile">SVG file</label>
+              <input id="svgFile" type="file" accept=".svg,image/svg+xml">
+            </div>
+            <div class="field">
+              <label for="spacing">Sample spacing after scale (mm)</label>
+              <input id="spacing" type="number" value="2" min="0.01" step="0.1">
+            </div>
+            <div class="field">
+              <label>Supported geometry</label>
+              <input value="path, line, polyline, rect, circle, ellipse, polygon" readonly>
+            </div>
+          </div>
+          <div id="inputStatus" class="status">Choose an SVG file to begin.</div>
+        </div>
+      </div>
 
-  <!-- Motion view -->
-  <div class="stage">
-    <canvas id="cv"></canvas>
-    <div class="badge" id="badge">workspace · 0–400 mm</div>
-    <div class="err" id="err">⚠ target out of range</div>
-  </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>2. Workspace Mapping</h2>
+          <span class="hint">Offsets apply after scale and flip</span>
+        </div>
+        <div class="body">
+          <div class="fields">
+            <div class="field">
+              <label for="scale">Scale (mm per SVG unit)</label>
+              <input id="scale" type="number" value="1" step="0.01">
+            </div>
+            <div class="field">
+              <label for="elbow">Elbow solution</label>
+              <select id="elbow">
+                <option value="UP">UP</option>
+                <option value="DOWN">DOWN</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="offsetX">X offset (mm)</label>
+              <input id="offsetX" type="number" value="0" step="1">
+            </div>
+            <div class="field">
+              <label for="offsetY">Y offset (mm)</label>
+              <input id="offsetY" type="number" value="0" step="1">
+            </div>
+            <div class="field full">
+              <label class="checkbox" for="flipY">
+                <span>Flip SVG Y into arm Y (default ON)</span>
+                <input id="flipY" type="checkbox" checked>
+              </label>
+              <div class="note">
+                SVG Y increases downward while arm Y is forward/up. Verify the
+                final orientation empirically before cutting.
+              </div>
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="validateButton" class="primary" disabled>Validate</button>
+          </div>
+          <div id="validationStatus" class="status">Load an SVG before validating.</div>
+        </div>
+      </div>
 
-  <!-- Position and motor data -->
-  <div class="telem" id="telem">
-    <div class="cell"><div class="k">θ1 shoulder</div><div class="v a" id="o_t1">0.0<span class="u">°</span></div></div>
-    <div class="cell"><div class="k">θ2 elbow</div><div class="v c" id="o_t2">0.0<span class="u">°</span></div></div>
-    <div class="cell"><div class="k">tip position</div><div class="v t" id="o_xy">—</div></div>
-    <div class="cell"><div class="k">motor 1 turns</div><div class="v a" id="o_m1">0.0<span class="u">rev</span></div></div>
-    <div class="cell"><div class="k">motor 2 turns</div><div class="v c" id="o_m2">0.0<span class="u">rev</span></div></div>
-    <div class="cell"><div class="k">Δ microsteps J1</div><div class="v a" id="o_s1">0</div></div>
-    <div class="cell"><div class="k">Δ microsteps J2</div><div class="v c" id="o_s2">0</div></div>
-    <div class="cell"><div class="k">resolution J1 / J2</div><div class="v t" id="o_res" style="font-size:14px">—</div></div>
-  </div>
-  <div class="legend" style="grid-column:1/-1">
-    <span><i style="background:var(--link1)"></i>link 1 (θ1)</span>
-    <span><i style="background:var(--link2)"></i>link 2 (θ2)</span>
-    <span><i style="background:var(--target)"></i>target</span>
-    <span><i style="background:var(--ghost)"></i>commanded end pose (ghost)</span>
-    <span><i style="background:var(--cyan);opacity:.6"></i>tip trail</span>
-  </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Sequences / Cut Order</h2>
+          <span class="hint">Flattened for firmware output</span>
+        </div>
+        <div class="body">
+          <div id="sequenceList" class="sequence-list">
+            <div class="note">No sampled sequences yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="roundtrip">
+        To verify the Y-flip and scale/offset are correct, you can run TEACH on
+        the real arm to trace a known shape, use the firmware's existing
+        reporting (<code>REPORT ... X= Y=</code>) to record the traced (x,y)
+        points manually, then check that re-running those (x,y) through this
+        tool's IK reproduces angles consistent with what was taught.
+      </div>
+    </section>
+
+    <section class="stack">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>3. Live Preview</h2>
+          <span class="hint">Arm coordinates: +X right, +Y forward</span>
+        </div>
+        <div class="preview-wrap">
+          <svg id="preview" viewBox="-450 -450 900 900" aria-label="SwivelCut path preview">
+            <g transform="scale(1,-1)">
+              <g id="workspaceRegion"></g>
+              <line x1="-440" y1="0" x2="440" y2="0" stroke="#4a586b" stroke-width="1.5"></line>
+              <line x1="0" y1="-440" x2="0" y2="440" stroke="#4a586b" stroke-width="1.5"></line>
+              <g id="pathLayer"></g>
+              <g id="pointLayer"></g>
+            </g>
+          </svg>
+          <div class="preview-key">
+            <span class="key"><i class="swatch" style="background:#56d8d0"></i>Transformed path</span>
+            <span class="key"><i class="swatch" style="background:#ff6875"></i>Unreachable</span>
+            <span class="key"><i class="swatch" style="background:#31465c"></i>Reachable joint-limited region</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>4. LOAD POINTS Output</h2>
+          <span id="outputMeta" class="hint">0 points</span>
+        </div>
+        <div class="body">
+          <div class="button-row" style="margin-top:0;margin-bottom:12px">
+            <button id="generateButton" class="primary" disabled>Generate LOAD POINTS package</button>
+            <button id="copyButton" disabled>Copy to clipboard</button>
+          </div>
+          <div id="limitWarning" class="warning"></div>
+          <textarea id="output" readonly spellcheck="false" placeholder="Validate a reachable path, then generate the package."></textarea>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
 
-<script>
-const $ = id => document.getElementById(id);
-const TAU = Math.PI*2, D2R = Math.PI/180, R2D = 180/Math.PI;
+<div id="svgHost" aria-hidden="true"></div>
 
-// State
-const S = {
-  L1:200, L2:200, g1:6, g2:9, spr:200, micro:32,
-  j1Min:-90*D2R, j1Max:90*D2R, j2Min:-180*D2R, j2Max:180*D2R,
-  foldedRadius:1, lineSeg:2, coupling:0,
-  command:"xy", elbow:"up",
-  cur:{t1:0, t2:Math.PI},       // required folded startup pose
-  cmd:{t1:0, t2:0, ok:false, error:""},
-  trail:[], anim:null
+<script>
+"use strict";
+
+const LINK_1_MM = 200.0;
+const LINK_2_MM = 200.0;
+const J1_MIN_DEG = -90.0;
+const J1_MAX_DEG = 90.0;
+const J2_MIN_DEG = -180.0;
+const J2_MAX_DEG = 180.0;
+const MAX_TEACH_POINTS = 3000;
+const SHAPE_SELECTOR = "path,line,polyline,rect,circle,ellipse,polygon";
+const SEQUENCE_COLORS = [
+  "#56d8d0", "#ffad66", "#73a7ff", "#c78cff",
+  "#76d99b", "#f07db5", "#e6d36f", "#7fd4ff"
+];
+
+const state = {
+  sourceName: "",
+  sequences: [],
+  transformed: [],
+  validation: null,
+  packageText: ""
 };
 
-// Kinematics
-function forward(t1,t2){
-  const forward=S.L1*Math.cos(t1)+S.L2*Math.cos(t1+t2);
-  const sideways=S.L1*Math.sin(t1)+S.L2*Math.sin(t1+t2);
-  return [sideways,forward];
+const $ = id => document.getElementById(id);
+const radians = degrees => degrees * Math.PI / 180.0;
+const degrees = radiansValue => radiansValue * 180.0 / Math.PI;
+const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+
+function angleInRange(j1Deg, j2Deg) {
+  return j1Deg >= J1_MIN_DEG && j1Deg <= J1_MAX_DEG &&
+         j2Deg >= J2_MIN_DEG && j2Deg <= J2_MAX_DEG;
 }
-function elbowPosition(t1){
-  return [S.L1*Math.sin(t1),S.L1*Math.cos(t1)];
+
+function forwardKinematics(j1Deg, j2Deg) {
+  const t1 = radians(j1Deg);
+  const t2 = radians(j2Deg);
+  const y = LINK_1_MM * Math.cos(t1) +
+            LINK_2_MM * Math.cos(t1 + t2);
+  const x = LINK_1_MM * Math.sin(t1) +
+            LINK_2_MM * Math.sin(t1 + t2);
+  return { x, y };
 }
-function inverse(x,y,elbow){
-  const r2=x*x+y*y;
-  let c2=(r2 - S.L1*S.L1 - S.L2*S.L2)/(2*S.L1*S.L2);
-  if(c2 < -1-1e-12 || c2 > 1+1e-12) return null;
-  c2=Math.max(-1,Math.min(1,c2));
-  let s2=Math.sqrt(1-c2*c2); if(elbow==="down") s2=-s2;
-  const t2=normalizeAngle(Math.atan2(s2,c2));
-  const t1=normalizeAngle(
-    Math.atan2(x,y)-Math.atan2(S.L2*s2, S.L1+S.L2*c2)
+
+function inverseKinematicsDetailed(x, y, elbowDown) {
+  let c2 = (x * x + y * y - LINK_1_MM * LINK_1_MM -
+            LINK_2_MM * LINK_2_MM) / (2.0 * LINK_1_MM * LINK_2_MM);
+  if (c2 < -1.00001 || c2 > 1.00001) {
+    const reach = Math.hypot(x, y);
+    const outer = LINK_1_MM + LINK_2_MM;
+    const inner = Math.abs(LINK_1_MM - LINK_2_MM);
+    return {
+      ok: false,
+      reason: reach > outer
+        ? `too far by ${(reach - outer).toFixed(2)} mm`
+        : `too close by ${(inner - reach).toFixed(2)} mm`,
+      type: "annulus",
+      c2
+    };
+  }
+  c2 = clamp(c2, -1.0, 1.0);
+  let s2 = Math.sqrt(Math.max(0.0, 1.0 - c2 * c2));
+  if (elbowDown) s2 = -s2;
+  const t2 = Math.atan2(s2, c2);
+  const t1 = Math.atan2(x, y) -
+             Math.atan2(LINK_2_MM * s2, LINK_1_MM + LINK_2_MM * c2);
+  const j1Deg = degrees(t1);
+  const j2Deg = degrees(t2);
+  if (!angleInRange(j1Deg, j2Deg)) {
+    const failures = [];
+    if (j1Deg < J1_MIN_DEG) failures.push(`J1 ${(J1_MIN_DEG - j1Deg).toFixed(2)}° below minimum`);
+    if (j1Deg > J1_MAX_DEG) failures.push(`J1 ${(j1Deg - J1_MAX_DEG).toFixed(2)}° above maximum`);
+    if (j2Deg < J2_MIN_DEG) failures.push(`J2 ${(J2_MIN_DEG - j2Deg).toFixed(2)}° below minimum`);
+    if (j2Deg > J2_MAX_DEG) failures.push(`J2 ${(j2Deg - J2_MAX_DEG).toFixed(2)}° above maximum`);
+    return {
+      ok: false,
+      reason: failures.join("; "),
+      type: "joint-limit",
+      j1Deg,
+      j2Deg
+    };
+  }
+  return { ok: true, j1Deg, j2Deg };
+}
+
+function inverseKinematics(x, y, elbowDown) {
+  const result = inverseKinematicsDetailed(x, y, elbowDown);
+  return result.ok ? { j1Deg: result.j1Deg, j2Deg: result.j2Deg } : null;
+}
+
+function mappingSettings() {
+  return {
+    scale: Number($("scale").value),
+    offsetX: Number($("offsetX").value),
+    offsetY: Number($("offsetY").value),
+    flipY: $("flipY").checked,
+    elbowDown: $("elbow").value === "DOWN"
+  };
+}
+
+function transformPoint(point, settings = mappingSettings()) {
+  const scaledY = point.y * settings.scale;
+  return {
+    x: point.x * settings.scale + settings.offsetX,
+    y: (settings.flipY ? -scaledY : scaledY) + settings.offsetY
+  };
+}
+
+function multiplyMatrices(left, right) {
+  return {
+    a: left.a * right.a + left.c * right.b,
+    b: left.b * right.a + left.d * right.b,
+    c: left.a * right.c + left.c * right.d,
+    d: left.b * right.c + left.d * right.d,
+    e: left.a * right.e + left.c * right.f + left.e,
+    f: left.b * right.e + left.d * right.f + left.f
+  };
+}
+
+function invertMatrix(matrix) {
+  const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+  if (Math.abs(determinant) < 1e-12) return null;
+  return {
+    a: matrix.d / determinant,
+    b: -matrix.b / determinant,
+    c: -matrix.c / determinant,
+    d: matrix.a / determinant,
+    e: (matrix.c * matrix.f - matrix.d * matrix.e) / determinant,
+    f: (matrix.b * matrix.e - matrix.a * matrix.f) / determinant
+  };
+}
+
+function elementMatrixInSvg(element) {
+  if (typeof element.getCTM !== "function") return null;
+  const elementMatrix = element.getCTM();
+  const svg = element.ownerSVGElement;
+  const rootMatrix = svg && typeof svg.getCTM === "function" ? svg.getCTM() : null;
+  if (!elementMatrix || !rootMatrix) return elementMatrix;
+  const inverseRoot = invertMatrix(rootMatrix);
+  return inverseRoot ? multiplyMatrices(inverseRoot, elementMatrix) : elementMatrix;
+}
+
+function transformedSvgPoint(element, point) {
+  const matrix = elementMatrixInSvg(element);
+  if (!matrix) return { x: point.x, y: point.y };
+  return {
+    x: matrix.a * point.x + matrix.c * point.y + matrix.e,
+    y: matrix.b * point.x + matrix.d * point.y + matrix.f
+  };
+}
+
+function sampleGeometry(element, spacing) {
+  const totalLength = element.getTotalLength();
+  const matrix = elementMatrixInSvg(element);
+  const transformScale = matrix
+    ? Math.max(Math.hypot(matrix.a, matrix.b), Math.hypot(matrix.c, matrix.d))
+    : 1.0;
+  const localSpacing = spacing / Math.max(transformScale, 0.000001);
+  const segmentCount = Math.max(1, Math.ceil(totalLength / localSpacing));
+  const points = [];
+  for (let i = 0; i <= segmentCount; ++i) {
+    const point = element.getPointAtLength(totalLength * i / segmentCount);
+    points.push(transformedSvgPoint(element, point));
+  }
+  return points;
+}
+
+function splitDiscontinuousSubpaths(points, spacing) {
+  if (points.length === 0) return [];
+  const sequences = [[points[0]]];
+  const threshold = Math.max(spacing * 3.0, 0.001);
+  for (let i = 1; i < points.length; ++i) {
+    const previous = points[i - 1];
+    const point = points[i];
+    if (Math.hypot(point.x - previous.x, point.y - previous.y) > threshold) {
+      sequences.push([point]);
+    } else {
+      sequences[sequences.length - 1].push(point);
+    }
+  }
+  return sequences.filter(sequence => sequence.length > 1);
+}
+
+function splitPathDataRecords(records) {
+  const subpaths = [];
+  let current = [];
+  for (const record of records) {
+    if (record.type.toUpperCase() === "M" && current.length > 0) {
+      subpaths.push(current);
+      current = [];
+    }
+    current.push(record);
+  }
+  if (current.length > 0) subpaths.push(current);
+  return subpaths;
+}
+
+function serializePathData(records) {
+  return records.map(record =>
+    `${record.type} ${Array.from(record.values || []).join(" ")}`
+  ).join(" ");
+}
+
+function samplePathSubpaths(element, spacing) {
+  if (typeof element.getPathData !== "function" || !element.parentNode) {
+    return splitDiscontinuousSubpaths(sampleGeometry(element, spacing), spacing);
+  }
+  try {
+    const records = element.getPathData({ normalize: true });
+    const recordGroups = splitPathDataRecords(records);
+    if (recordGroups.length <= 1) return [sampleGeometry(element, spacing)];
+    return recordGroups.map(recordsForSubpath => {
+      const temporaryPath = document.createElementNS(
+          "http://www.w3.org/2000/svg", "path");
+      temporaryPath.setAttribute("d", serializePathData(recordsForSubpath));
+      const transform = element.getAttribute("transform");
+      if (transform) temporaryPath.setAttribute("transform", transform);
+      temporaryPath.setAttribute("visibility", "hidden");
+      element.parentNode.appendChild(temporaryPath);
+      const points = sampleGeometry(temporaryPath, spacing);
+      temporaryPath.remove();
+      return points;
+    }).filter(points => points.length > 1);
+  } catch (_) {
+    return splitDiscontinuousSubpaths(sampleGeometry(element, spacing), spacing);
+  }
+}
+
+function sampleSvgGeometry(svg, spacingMm, scale) {
+  const sequences = [];
+  const spacing = spacingMm / Math.max(Math.abs(scale), 0.000001);
+  const elements = Array.from(svg.querySelectorAll(SHAPE_SELECTOR));
+  elements.forEach((element, shapeIndex) => {
+    if (typeof element.getTotalLength !== "function" ||
+        typeof element.getPointAtLength !== "function") return;
+    const parts = element.tagName.toLowerCase() === "path"
+      ? samplePathSubpaths(element, spacing)
+      : [sampleGeometry(element, spacing)];
+    parts.forEach((points, partIndex) => {
+      sequences.push({
+        shapeIndex: shapeIndex + 1,
+        partIndex: partIndex + 1,
+        type: element.tagName.toLowerCase(),
+        id: element.id || "",
+        points
+      });
+    });
+  });
+  return { sequences, elementCount: elements.length };
+}
+
+function flattenSequences(sequences) {
+  return sequences.flatMap((sequence, sequenceIndex) =>
+    sequence.points.map((point, pointIndex) => ({
+      ...point,
+      sequenceIndex,
+      pointIndex
+    }))
   );
-  return [t1,t2];
-}
-function normalizeAngle(angle){
-  let normalized=((angle+Math.PI)%TAU+TAU)%TAU-Math.PI;
-  if(normalized===-Math.PI&&angle>0) normalized=Math.PI;
-  return normalized;
-}
-function validAngles(t1,t2){
-  return t1>=S.j1Min&&t1<=S.j1Max&&t2>=S.j2Min&&t2<=S.j2Max;
-}
-function reachable(x,y){
-  const r=Math.hypot(x,y);
-  return Math.abs(S.L1-S.L2)<=r&&r<=S.L1+S.L2;
-}
-const stepsPerRad = g => S.spr*S.micro*g/TAU;
-function pyRound(value){
-  const lower=Math.floor(value);
-  const fraction=value-lower;
-  if(fraction<0.5) return lower;
-  if(fraction>0.5) return lower+1;
-  return lower%2===0?lower:lower+1;
 }
 
-function numberValue(id){ return Number($(id).value); }
-function solveXY(x,y,elbow=S.elbow){
-  const solution=inverse(x,y,elbow);
-  return solution&&validAngles(solution[0],solution[1])?solution:null;
-}
-
-function commandTarget(){
-  const command=S.command;
-  let t1=S.cur.t1, t2=S.cur.t2, x=null, y=null, start=null;
-  let serial="";
-  if(command==="angles"||command==="j1"||command==="j2"){
-    if(command!=="j2") t1=numberValue("tt1")*D2R;
-    if(command!=="j1") t2=numberValue("tt2")*D2R;
-    serial=command==="angles"
-      ?`ANGLES ${numberValue("tt1")} ${numberValue("tt2")}`
-      :`${command.toUpperCase()} ${command==="j1"?numberValue("tt1"):numberValue("tt2")}`;
-    if(!validAngles(t1,t2)) return {ok:false,error:"joint angle outside software limits",serial};
-    [x,y]=forward(t1,t2);
-  }else if(command==="cut"){
-    start=[numberValue("x0"),numberValue("y0")];
-    x=numberValue("x1"); y=numberValue("y1");
-    serial=`CUT ${start[0]} ${start[1]} ${x} ${y} ${S.elbow.toUpperCase()}`;
-    const current=forward(S.cur.t1,S.cur.t2);
-    if(Math.hypot(current[0],current[1])<S.foldedRadius){
-      return {ok:false,error:"unfold with XY before CUT",serial};
+function validatePoints(points, elbowDown) {
+  let reachable = 0;
+  let firstFailure = null;
+  const results = points.map((point, index) => {
+    const ik = inverseKinematicsDetailed(point.x, point.y, elbowDown);
+    if (ik.ok) {
+      reachable += 1;
+    } else if (!firstFailure) {
+      firstFailure = { index, point, ik };
     }
-    if(!lineReachable(start[0],start[1],x,y)){
-      return {ok:false,error:"line crosses unreachable workspace",serial};
-    }
-    const segmentSolutions=cutSolutions(start[0],start[1],x,y,S.elbow);
-    if(!segmentSolutions) return {ok:false,error:"line exceeds joint limits",serial};
-    [t1,t2]=segmentSolutions[segmentSolutions.length-1];
-  }else{
-    x=numberValue("tx"); y=numberValue("ty");
-    serial=`${command.toUpperCase()} ${x} ${y} ${S.elbow.toUpperCase()}`;
-    const solution=solveXY(x,y);
-    if(!solution) return {ok:false,error:"target unreachable or outside joint limits",serial};
-    if(command!=="xyj2") t1=solution[0];
-    if(command!=="xyj1") t2=solution[1];
+    return { point, ik, index };
+  });
+  return {
+    total: points.length,
+    reachable,
+    allReachable: points.length > 1 && reachable === points.length,
+    firstFailure,
+    results
+  };
+}
+
+function generateLoadPointsPackage(validation) {
+  if (!validation || !validation.allReachable) return "";
+  const lines = [`LOAD POINTS ${validation.total}`];
+  for (const result of validation.results) {
+    lines.push(`${result.ik.j1Deg.toFixed(6)} ${result.ik.j2Deg.toFixed(6)}`);
   }
-  return {ok:true,error:"",t1,t2,x,y,start,serial};
+  return lines.join("\n");
 }
 
-function recompute(){
-  S.cmd=commandTarget();
-  $("serialPreview").value=S.cmd.serial||"";
-  updateTelemetry(); draw();
-}
-
-// Readout
-function fmt(n,d=1){return (n>=0?"":"")+n.toFixed(d);}
-function updateTelemetry(){
-  const tgt=S.cmd.ok?S.cmd:S.cur;
-  $("o_t1").innerHTML = fmt(tgt.t1*R2D)+'<span class="u">°</span>';
-  $("o_t2").innerHTML = fmt(tgt.t2*R2D)+'<span class="u">°</span>';
-  const [tx,ty]=forward(tgt.t1,tgt.t2);
-  $("o_xy").textContent = `${tx.toFixed(0)}, ${ty.toFixed(0)}`;
-  const m1=tgt.t1/TAU*S.g1;
-  const m2=(tgt.t2+S.coupling*tgt.t1)/TAU*S.g2;
-  $("o_m1").innerHTML = fmt(m1,2)+'<span class="u">rev</span>';
-  $("o_m2").innerHTML = fmt(m2,2)+'<span class="u">rev</span>';
-  const ds1=pyRound(tgt.t1*stepsPerRad(S.g1))
-    -pyRound(S.cur.t1*stepsPerRad(S.g1));
-  const ds2=pyRound((tgt.t2+S.coupling*tgt.t1)*stepsPerRad(S.g2))
-    -pyRound((S.cur.t2+S.coupling*S.cur.t1)*stepsPerRad(S.g2));
-  $("o_s1").textContent=ds1.toLocaleString();
-  $("o_s2").textContent=ds2.toLocaleString();
-  const r1=360/(S.spr*S.micro*S.g1), r2=360/(S.spr*S.micro*S.g2);
-  $("o_res").textContent=`${r1.toFixed(4)}° / ${r2.toFixed(4)}°`;
-  $("err").textContent = S.cmd.error||"target out of range";
-  $("err").style.display = S.cmd.ok ? "none":"block";
-  $("badge").textContent = `workspace · ${Math.abs(S.L1-S.L2).toFixed(0)}–${(S.L1+S.L2).toFixed(0)} mm`;
-}
-
-// Drawing
-const cv=$("cv"), ctx=cv.getContext("2d");
-let DPR=1, W=0, H=0, scale=1, ox=0, oy=0;
-function resize(){
-  const r=cv.getBoundingClientRect();
-  DPR=window.devicePixelRatio||1;
-  cv.width=r.width*DPR; cv.height=r.height*DPR;
-  W=r.width; H=r.height;
-  fitView();
-}
-function fitView(){
-  const Rmax=S.L1+S.L2;
-  const pad=46;
-  scale=Math.max(0,(Math.min(W,H)/2 - pad))/Rmax;
-  ox=W/2; oy=H/2;            // base at canvas centre (centre of reach disk)
-}
-const sx=x=>ox+x*scale, sy=y=>oy-y*scale;
-
-function draw(){
-  ctx.save(); ctx.scale(DPR,DPR);
-  ctx.clearRect(0,0,W,H);
-
-  // grid
-  const cs=window.getComputedStyle(document.documentElement);
-  const Cgrid=cs.getPropertyValue('--grid'), Cgrid2=cs.getPropertyValue('--grid2');
-  ctx.lineWidth=1;
-  const stepmm=50;
-  ctx.strokeStyle=Cgrid;
-  for(let gx=0; gx<=S.L1+S.L2; gx+=stepmm){
-    [gx,-gx].forEach(v=>{ctx.beginPath();ctx.moveTo(sx(v),0);ctx.lineTo(sx(v),H);ctx.stroke();});
-  }
-  for(let gy=0; gy<=S.L1+S.L2; gy+=stepmm){
-    [gy,-gy].forEach(v=>{ctx.beginPath();ctx.moveTo(0,sy(v));ctx.lineTo(W,sy(v));ctx.stroke();});
-  }
-
-  // Reachable area
-  const Ro=(S.L1+S.L2)*scale, Ri=Math.abs(S.L1-S.L2)*scale;
-  ctx.beginPath(); ctx.arc(ox,oy,Ro,0,TAU);
-  ctx.fillStyle="rgba(51,227,207,.045)"; ctx.fill();
-  if(Ri>0){ctx.beginPath();ctx.arc(ox,oy,Ri,0,TAU);
-    ctx.fillStyle="#050809"; ctx.fill();}
-  ctx.lineWidth=1.2; ctx.strokeStyle="rgba(51,227,207,.28)";
-  ctx.beginPath(); ctx.arc(ox,oy,Ro,0,TAU); ctx.stroke();
-  if(Ri>0){ctx.setLineDash([4,4]);ctx.beginPath();ctx.arc(ox,oy,Ri,0,TAU);ctx.stroke();ctx.setLineDash([]);}
-
-  // axes
-  ctx.strokeStyle=Cgrid2; ctx.beginPath();
-  ctx.moveTo(0,sy(0));ctx.lineTo(W,sy(0));ctx.moveTo(sx(0),0);ctx.lineTo(sx(0),H);ctx.stroke();
-  ctx.fillStyle="rgba(211,230,230,.55)";
-  ctx.font='11px "JetBrains Mono", monospace';
-  ctx.fillText("+X right",W-66,sy(0)-8);
-  ctx.fillText("+Y forward",sx(0)+8,14);
-
-  // trail
-  if(S.trail.length>1){
-    ctx.lineWidth=2; ctx.lineJoin="round";
-    for(let i=1;i<S.trail.length;i++){
-      const a=i/S.trail.length;
-      ctx.strokeStyle=`rgba(51,227,207,${0.12+a*0.5})`;
-      ctx.beginPath();
-      ctx.moveTo(sx(S.trail[i-1][0]),sy(S.trail[i-1][1]));
-      ctx.lineTo(sx(S.trail[i][0]),sy(S.trail[i][1]));
-      ctx.stroke();
+function workspaceSamples(elbowDown, stepDeg = 2) {
+  const points = [];
+  for (let j1 = J1_MIN_DEG; j1 <= J1_MAX_DEG; j1 += stepDeg) {
+    for (let j2 = J2_MIN_DEG; j2 <= J2_MAX_DEG; j2 += stepDeg) {
+      if ((elbowDown && j2 > 0) || (!elbowDown && j2 < 0)) continue;
+      points.push(forwardKinematics(j1, j2));
     }
   }
-
-  // Commanded end pose
-  if(S.cmd.ok){ drawArm(S.cmd.t1,S.cmd.t2,"#5d7d80","#5d7d80",true); }
-
-  // Target
-  if(S.cmd.ok&&S.cmd.x!==null){
-    const X=sx(S.cmd.x), Y=sy(S.cmd.y);
-    ctx.strokeStyle=cs.getPropertyValue('--target'); ctx.lineWidth=1.6;
-    ctx.beginPath();ctx.moveTo(X-9,Y);ctx.lineTo(X+9,Y);
-    ctx.moveTo(X,Y-9);ctx.lineTo(X,Y+9);ctx.stroke();
-    ctx.beginPath();ctx.arc(X,Y,6,0,TAU);ctx.stroke();
-  }
-
-  // Current pose
-  drawArm(S.cur.t1,S.cur.t2,
-    cs.getPropertyValue('--link1'), cs.getPropertyValue('--link2'), false);
-
-  ctx.restore();
+  return points;
 }
 
-function drawArm(t1,t2,c1,c2,ghost){
-  const [ex,ey]=elbowPosition(t1);
-  const [tx,ty]=forward(t1,t2);
-  const bw=ghost?5:11;
-  ctx.lineCap="round";
-  if(ghost){ctx.setLineDash([7,6]); ctx.globalAlpha=.85;}
-  // link1
-  ctx.lineWidth=bw; ctx.strokeStyle=c1;
-  ctx.beginPath();ctx.moveTo(sx(0),sy(0));ctx.lineTo(sx(ex),sy(ey));ctx.stroke();
-  // link2
-  ctx.strokeStyle=c2;
-  ctx.beginPath();ctx.moveTo(sx(ex),sy(ey));ctx.lineTo(sx(tx),sy(ty));ctx.stroke();
-  ctx.setLineDash([]); ctx.globalAlpha=1;
-  if(ghost) return;
-  // joints
-  joint(sx(0),sy(0), "#0b1112", c1, 9);
-  joint(sx(ex),sy(ey), "#0b1112", c2, 8);
-  // Blade point
-  ctx.fillStyle="#050809"; ctx.strokeStyle=c2; ctx.lineWidth=2.5;
-  ctx.beginPath();ctx.arc(sx(tx),sy(ty),5,0,TAU);ctx.fill();ctx.stroke();
-}
-function joint(x,y,fill,ring,r){
-  ctx.fillStyle=fill; ctx.strokeStyle=ring; ctx.lineWidth=3;
-  ctx.beginPath();ctx.arc(x,y,r,0,TAU);ctx.fill();ctx.stroke();
+function renderWorkspace() {
+  const elbowDown = $("elbow").value === "DOWN";
+  const points = workspaceSamples(elbowDown, 3);
+  const circles = points.map(point =>
+    `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="3.2"></circle>`
+  ).join("");
+  $("workspaceRegion").innerHTML =
+    `<g fill="#31465c" fill-opacity=".32">${circles}</g>` +
+    `<circle cx="0" cy="0" r="${LINK_1_MM + LINK_2_MM}" fill="none" stroke="#51637a" stroke-width="1.5" stroke-dasharray="6 7"></circle>`;
 }
 
-// Animation
-function easeTrap(t){
-  const a=0.28;
-  if(t<a)        return (t*t)/(2*a*(1-a));
-  if(t<1-a)      return (t-a/2)/(1-a);
-  const u=1-t;   return 1-(u*u)/(2*a*(1-a));
-}
-function lineReachable(x0,y0,x1,y1){
-  if(!reachable(x0,y0)||!reachable(x1,y1)) return false;
-  const dx=x1-x0, dy=y1-y0;
-  const len2=dx*dx+dy*dy;
-  const u=len2===0?0:Math.max(0,Math.min(1,-(x0*dx+y0*dy)/len2));
-  const nearest=Math.hypot(x0+u*dx,y0+u*dy);
-  return nearest+1e-9>=Math.abs(S.L1-S.L2);
-}
-function cutSolutions(x0,y0,x1,y1,elbow){
-  const distance=Math.hypot(x1-x0,y1-y0);
-  const segments=Math.max(1,Math.ceil(distance/S.lineSeg));
-  const solutions=[];
-  for(let i=0;i<=segments;i++){
-    const fraction=i/segments;
-    const solution=solveXY(
-      x0+(x1-x0)*fraction,
-      y0+(y1-y0)*fraction,
-      elbow
-    );
-    if(!solution) return null;
-    solutions.push(solution);
-  }
-  return solutions;
-}
-function execute(){
-  if(!S.cmd.ok || S.anim) return;
-  const start={t1:S.cur.t1,t2:S.cur.t2};
-  const end={t1:S.cmd.t1,t2:S.cmd.t2};
-  const lineMode=S.command==="cut";
-  const cutStart=lineMode?solveXY(S.cmd.start[0],S.cmd.start[1]):null;
-  const dJoint=Math.max(Math.abs(end.t1-start.t1),Math.abs(end.t2-start.t2));
-  if(dJoint<1e-4 && !lineMode){ return; }
-  const dur=Math.max(450, Math.min(2200, dJoint*R2D*9));  // ms, ~scaled to travel
-  S.trail=[]; $("go").classList.add("busy"); $("go").textContent="● moving…";
-  const t0=performance.now();
-
-  function frame(now){
-    let p=(now-t0)/dur; if(p>1)p=1;
-    const e=easeTrap(p);
-    if(lineMode){
-      let x,y;
-      if(e<0.35){
-        const u=e/0.35;
-        S.cur.t1=start.t1+(cutStart[0]-start.t1)*u;
-        S.cur.t2=start.t2+(cutStart[1]-start.t2)*u;
-      }else{
-        const u=(e-0.35)/0.65;
-        x=S.cmd.start[0]+(S.cmd.x-S.cmd.start[0])*u;
-        y=S.cmd.start[1]+(S.cmd.y-S.cmd.start[1])*u;
-        const sol=inverse(x,y,S.elbow);
-        if(sol){S.cur.t1=sol[0];S.cur.t2=sol[1];}
-      }
-    }else{
-      S.cur.t1=start.t1+(end.t1-start.t1)*e;
-      S.cur.t2=start.t2+(end.t2-start.t2)*e;
-    }
-    S.trail.push(forward(S.cur.t1,S.cur.t2));
-    if(S.trail.length>900)S.trail.shift();
-    draw();
-    if(p<1){ S.anim=requestAnimationFrame(frame); }
-    else{
-      S.anim=null; S.cur={t1:end.t1,t2:end.t2};
-      $("go").classList.remove("busy"); $("go").textContent="▶ Execute move";
-      recompute();
-    }
-  }
-  S.anim=requestAnimationFrame(frame);
-}
-
-// Events
-["tx","ty","tt1","tt2","x0","y0","x1","y1"].forEach(id=>{
-  $(id).addEventListener("input",recompute);
-});
-function segWire(seg,fn){
-  $(seg).querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>{
-    $(seg).querySelectorAll("button").forEach(x=>x.classList.remove("on"));
-    b.classList.add("on"); fn(b); recompute();
+function renderPreview() {
+  renderWorkspace();
+  const settings = mappingSettings();
+  state.transformed = state.sequences.map(sequence => ({
+    ...sequence,
+    points: sequence.points.map(point => transformPoint(point, settings))
   }));
-}
-segWire("elbowSeg",b=>S.elbow=b.dataset.e);
-function updateCommandControls(){
-  S.command=$("command").value;
-  const angleCommand=["angles","j1","j2"].includes(S.command);
-  $("xyInputs").style.display=["xy","xyj1","xyj2"].includes(S.command)?"flex":"none";
-  $("angleInputs").style.display=angleCommand?"flex":"none";
-  $("cutInputs").style.display=S.command==="cut"?"block":"none";
-  $("elbowControls").style.display=angleCommand?"none":"block";
-  $("t1Field").style.display=S.command==="j2"?"none":"flex";
-  $("t2Field").style.display=S.command==="j1"?"none":"flex";
-  recompute();
-}
-$("command").addEventListener("change",updateCommandControls);
-$("go").addEventListener("click",execute);
-$("home").addEventListener("click",()=>{
-  if(S.anim) return; S.cur={t1:0,t2:Math.PI}; S.trail=[]; recompute();
-});
 
-new ResizeObserver(()=>{resize();draw();}).observe(cv);
-window.addEventListener("load",()=>{ resize();
-  S.cur={t1:0,t2:Math.PI}; updateCommandControls();
-});
+  $("pathLayer").innerHTML = state.transformed.map((sequence, index) => {
+    const color = SEQUENCE_COLORS[index % SEQUENCE_COLORS.length];
+    const points = sequence.points.map(point => `${point.x},${point.y}`).join(" ");
+    return `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2.4" vector-effect="non-scaling-stroke"></polyline>`;
+  }).join("");
+
+  const invalidIndexes = new Set();
+  if (state.validation) {
+    state.validation.results.forEach(result => {
+      if (!result.ik.ok) invalidIndexes.add(result.index);
+    });
+  }
+  const flat = flattenSequences(state.transformed);
+  $("pointLayer").innerHTML = flat.map((point, index) => {
+    if (!invalidIndexes.has(index)) return "";
+    return `<circle cx="${point.x}" cy="${point.y}" r="5.5" fill="#ff6875" stroke="#3a050a" stroke-width="1.5" vector-effect="non-scaling-stroke"></circle>`;
+  }).join("");
+
+  $("pointCount").textContent = String(flat.length);
+  $("outputMeta").textContent = `${flat.length} points`;
+  $("limitWarning").textContent = flat.length > MAX_TEACH_POINTS
+    ? `Warning: ${flat.length} exceeds MAX_TEACH_POINTS (${MAX_TEACH_POINTS}). Increase spacing or simplify the SVG.`
+    : "";
+}
+
+function renderSequenceList() {
+  if (state.sequences.length === 0) {
+    $("sequenceList").innerHTML = `<div class="note">No sampled sequences yet.</div>`;
+    return;
+  }
+  $("sequenceList").innerHTML = state.sequences.map((sequence, index) => {
+    const color = SEQUENCE_COLORS[index % SEQUENCE_COLORS.length];
+    const identity = sequence.id ? `#${sequence.id}` : `${sequence.type} ${sequence.shapeIndex}`;
+    const part = sequence.partIndex > 1 ? `, subpath ${sequence.partIndex}` : "";
+    return `<div class="sequence">
+      <i style="background:${color}"></i>
+      <span><strong>${index + 1}.</strong> ${identity}${part}</span>
+      <span class="mono">${sequence.points.length} pts</span>
+    </div>`;
+  }).join("");
+}
+
+function invalidateValidation() {
+  state.validation = null;
+  state.packageText = "";
+  $("output").value = "";
+  $("generateButton").disabled = true;
+  $("copyButton").disabled = true;
+  $("validationBadge").textContent = "NOT RUN";
+  $("validationStatus").className = "status";
+  $("validationStatus").textContent = state.sequences.length
+    ? "Mapping changed. Validate the transformed path."
+    : "Load an SVG before validating.";
+  renderPreview();
+}
+
+function validateCurrentPath() {
+  const flat = flattenSequences(state.transformed);
+  const elbowDown = $("elbow").value === "DOWN";
+  state.validation = validatePoints(flat, elbowDown);
+  const result = state.validation;
+  if (result.allReachable) {
+    $("validationStatus").className = "status good";
+    $("validationStatus").textContent =
+      `${result.total} total points; ${result.reachable} reachable. Validation passed.`;
+    $("validationBadge").textContent = "PASS";
+  } else {
+    $("validationStatus").className = "status bad";
+    let message = `${result.total} total points; ${result.reachable} reachable.`;
+    if (result.firstFailure) {
+      const failure = result.firstFailure;
+      message += `\nFirst unreachable point ${failure.index}: ` +
+        `X=${failure.point.x.toFixed(3)} Y=${failure.point.y.toFixed(3)}; ` +
+        failure.ik.reason;
+    } else if (result.total <= 1) {
+      message += "\nAt least two points are required by LOAD POINTS.";
+    }
+    $("validationStatus").textContent = message;
+    $("validationBadge").textContent = "FAIL";
+  }
+  $("generateButton").disabled = !result.allReachable;
+  renderPreview();
+}
+
+function generatePackage() {
+  state.packageText = generateLoadPointsPackage(state.validation);
+  $("output").value = state.packageText;
+  $("copyButton").disabled = state.packageText.length === 0;
+}
+
+async function copyPackage() {
+  if (!state.packageText) return;
+  try {
+    await navigator.clipboard.writeText(state.packageText);
+    $("copyButton").textContent = "Copied";
+    setTimeout(() => { $("copyButton").textContent = "Copy to clipboard"; }, 1200);
+  } catch (_) {
+    $("output").focus();
+    $("output").select();
+    document.execCommand("copy");
+  }
+}
+
+function installSvgForMeasurement(svg) {
+  const host = $("svgHost");
+  host.replaceChildren();
+  svg.removeAttribute("width");
+  svg.removeAttribute("height");
+  svg.style.overflow = "visible";
+  host.appendChild(svg);
+}
+
+async function loadSvgFile(file) {
+  const text = await file.text();
+  const documentResult = new DOMParser().parseFromString(text, "image/svg+xml");
+  const parserError = documentResult.querySelector("parsererror");
+  const svg = documentResult.documentElement;
+  if (parserError || !svg || svg.tagName.toLowerCase() !== "svg") {
+    throw new Error("The selected file is not valid SVG.");
+  }
+  installSvgForMeasurement(svg);
+  await new Promise(resolve => requestAnimationFrame(resolve));
+  const spacingMm = Number($("spacing").value);
+  const scale = Number($("scale").value);
+  if (!Number.isFinite(spacingMm) || spacingMm <= 0) {
+    throw new Error("Sample spacing must be greater than zero.");
+  }
+  if (!Number.isFinite(scale) || scale === 0) {
+    throw new Error("Scale must be a non-zero number.");
+  }
+  const sampled = sampleSvgGeometry(svg, spacingMm, scale);
+  if (sampled.sequences.length === 0) {
+    throw new Error("No supported SVG geometry with measurable length was found.");
+  }
+  state.sourceName = file.name;
+  state.sequences = sampled.sequences;
+  $("sequenceCount").textContent = String(state.sequences.length);
+  $("inputStatus").className = "status good";
+  $("inputStatus").textContent =
+    `${file.name}: ${sampled.elementCount} supported elements, ` +
+    `${state.sequences.length} ordered sequences.`;
+  $("validateButton").disabled = false;
+  renderSequenceList();
+  invalidateValidation();
+}
+
+function resampleInstalledSvg() {
+  const svg = $("svgHost").querySelector("svg");
+  if (!svg) return;
+  const spacingMm = Number($("spacing").value);
+  const scale = Number($("scale").value);
+  if (!Number.isFinite(spacingMm) || spacingMm <= 0) {
+    $("inputStatus").className = "status bad";
+    $("inputStatus").textContent = "Sample spacing must be greater than zero.";
+    return;
+  }
+  if (!Number.isFinite(scale) || scale === 0) {
+    $("inputStatus").className = "status bad";
+    $("inputStatus").textContent = "Scale must be a non-zero number.";
+    return;
+  }
+  const sampled = sampleSvgGeometry(svg, spacingMm, scale);
+  state.sequences = sampled.sequences;
+  $("sequenceCount").textContent = String(state.sequences.length);
+  $("inputStatus").className = "status good";
+  $("inputStatus").textContent =
+    `${state.sourceName}: ${sampled.elementCount} supported elements, ` +
+    `${state.sequences.length} ordered sequences.`;
+  renderSequenceList();
+  invalidateValidation();
+}
+
+function initialize() {
+  renderWorkspace();
+  renderPreview();
+  $("svgFile").addEventListener("change", async event => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    try {
+      await loadSvgFile(file);
+    } catch (error) {
+      state.sequences = [];
+      state.transformed = [];
+      state.validation = null;
+      $("sequenceCount").textContent = "0";
+      $("validateButton").disabled = true;
+      $("inputStatus").className = "status bad";
+      $("inputStatus").textContent = error.message;
+      renderSequenceList();
+      renderPreview();
+    }
+  });
+  $("spacing").addEventListener("change", resampleInstalledSvg);
+  $("scale").addEventListener("input", resampleInstalledSvg);
+  $("scale").addEventListener("change", resampleInstalledSvg);
+  ["offsetX", "offsetY", "flipY", "elbow"].forEach(id => {
+    $(id).addEventListener("input", invalidateValidation);
+    $(id).addEventListener("change", invalidateValidation);
+  });
+  $("validateButton").addEventListener("click", validateCurrentPath);
+  $("generateButton").addEventListener("click", generatePackage);
+  $("copyButton").addEventListener("click", copyPackage);
+}
+
+initialize();
 </script>
+</body>
+</html>
