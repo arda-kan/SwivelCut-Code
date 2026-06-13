@@ -77,6 +77,8 @@ Five consistent readings are required before a head change is accepted.
 
 Head removal during teaching discards the incomplete trace. Head removal or
 another Start/Stop press during a cut aborts motion and retracts the blade.
+After a successful cut, Start/Stop will not run the same trace again; teach a
+new movement or use Repeat for another pass.
 
 The firmware prints a `REPORT` after operations with software J1/J2, XY,
 encoder J1/J2, and raw encoder counts.

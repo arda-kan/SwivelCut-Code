@@ -751,9 +751,6 @@ bool executeSteps(long deltaJ1, long deltaJ2) {
     serviceControlInputs();
     serviceEncoderStream();
     if (productCutActive) {
-      if (classifyHeadAdc(analogRead(HEAD_ID_PIN)) != HeadType::CUTTING) {
-        productAbortRequested = true;
-      }
       if (productAbortRequested) {
         Serial.println("CUT_ABORTED");
         return false;
@@ -1325,6 +1322,10 @@ void runProductCut(bool repeat) {
   }
   if (taughtCount < 2) {
     Serial.println("ERROR_NO_TRACED_PATH");
+    return;
+  }
+  if (!repeat && productHasLastCut) {
+    Serial.println("ERROR_CUT_ALREADY_COMPLETED_TEACH_ANOTHER_MOVEMENT");
     return;
   }
   if (repeat && !productHasLastCut) {
