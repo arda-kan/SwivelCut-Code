@@ -114,6 +114,11 @@ STATE TEST OFF
 HELP
 ```
 
+When `XY` omits `UP` or `DOWN`, the firmware automatically prefers `UP` for
+positive X and `DOWN` for negative X, then tries the other branch if the
+preferred solution violates a joint limit. `CUT` continues to default to `UP`
+when its branch is omitted so one continuous cut never changes elbow branch.
+
 After `LOAD POINTS <N>`, send exactly N lines containing:
 
 ```text

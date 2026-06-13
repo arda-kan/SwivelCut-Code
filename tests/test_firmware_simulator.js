@@ -105,6 +105,14 @@ let leftExtended = inverseKinematics(-400, 0, false);
 assert.ok(leftExtended);
 assert.ok(Math.abs(leftExtended.j1Deg - 90) < 1e-9);
 assert.ok(Math.abs(leftExtended.j2Deg) < 1e-9);
+let autoNegative = inverseKinematicsAuto(-100, 100);
+assert.ok(autoNegative);
+assert.strictEqual(autoNegative.elbowDown, true);
+assert.ok(Math.abs(autoNegative.j1Deg + 24.295188945364572) < 1e-9);
+assert.ok(Math.abs(autoNegative.j2Deg + 138.59037789072914) < 1e-9);
+let autoPositive = inverseKinematicsAuto(100, 100);
+assert.ok(autoPositive);
+assert.strictEqual(autoPositive.elbowDown, false);
 assert.strictEqual(inverseKinematics(401, 0, false), null);
 
 assert.deepStrictEqual(Array.from(scan("ANGLES 1.5 -2", "ANGLES %f %f")), [1.5, -2]);

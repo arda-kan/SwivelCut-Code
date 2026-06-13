@@ -551,6 +551,29 @@ async function moveToXY(x, y, elbowDown) {
   return moveToAngles(angles.j1Deg, angles.j2Deg, false);
 }
 
+function inverseKinematicsAuto(x, y) {
+  const preferredElbowDown = x < 0.0;
+  const preferred = inverseKinematics(x, y, preferredElbowDown);
+  if (preferred) {
+    return { ...preferred, elbowDown: preferredElbowDown };
+  }
+  const fallback = inverseKinematics(x, y, !preferredElbowDown);
+  return fallback
+    ? { ...fallback, elbowDown: !preferredElbowDown }
+    : null;
+}
+
+async function moveToXYAuto(x, y) {
+  const angles = inverseKinematicsAuto(x, y);
+  if (!angles) {
+    logLine("ERROR: XY point unreachable or outside joint limits");
+    return false;
+  }
+  logLine(`XY AUTO: ${angles.elbowDown ? "DOWN" : "UP"} ` +
+          `J1=${fixed(angles.j1Deg, 2)} J2=${fixed(angles.j2Deg, 2)}`);
+  return moveToAngles(angles.j1Deg, angles.j2Deg, false);
+}
+
 async function cutLine(x0, y0, x1, y1, elbowDown) {
   const distance = Math.hypot(x1 - x0, y1 - y0);
   const segments = Math.max(1, Math.ceil(distance / 2.0));
@@ -804,8 +827,8 @@ function printHelp() {
     "  ARM FOLDED | ARM J1 | ARM J2 | DISARM",
     "  TEST J1 <steps> | TEST J2 <steps>",
     "  J1 <deg> | J2 <deg> | ANGLES <j1> <j2>",
-    "  XY <x> <y> [UP|DOWN]",
-    "  CUT <x0> <y0> <x1> <y1> [UP|DOWN]",
+    "  XY <x> <y> [UP|DOWN] (omitted = AUTO by X side)",
+    "  CUT <x0> <y0> <x1> <y1> [UP|DOWN] (omitted = UP)",
     "  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]",
     "  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>",
     "  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS",
@@ -948,7 +971,9 @@ async function handleCommand(rawCommand) {
     if (values) {
       if (!state.armed || state.armMode !== AxisMode.DUAL) {
         logLine("ERROR: XY requires ARM FOLDED");
-      } else if (await moveToXY(values[0], values[1], values.length === 3 && parseElbow(values[2]))) {
+      } else if (await (values.length === 3
+          ? moveToXY(values[0], values[1], parseElbow(values[2]))
+          : moveToXYAuto(values[0], values[1]))) {
         printOperationReport("POSITION");
       }
       return;

@@ -934,6 +934,27 @@ bool moveToXY(float x, float y, bool elbowDown) {
   return moveToAngles(j1, j2, false);
 }
 
+bool moveToXYAuto(float x, float y) {
+  const bool preferredElbowDown = x < 0.0f;
+  float j1 = 0.0f;
+  float j2 = 0.0f;
+  bool elbowDown = preferredElbowDown;
+  if (!inverseKinematics(x, y, elbowDown, j1, j2)) {
+    elbowDown = !elbowDown;
+    if (!inverseKinematics(x, y, elbowDown, j1, j2)) {
+      Serial.println("ERROR: XY point unreachable or outside joint limits");
+      return false;
+    }
+  }
+  Serial.print("XY AUTO: ");
+  Serial.print(elbowDown ? "DOWN" : "UP");
+  Serial.print(" J1=");
+  Serial.print(j1, 2);
+  Serial.print(" J2=");
+  Serial.println(j2, 2);
+  return moveToAngles(j1, j2, false);
+}
+
 bool cutLine(float x0, float y0, float x1, float y1, bool elbowDown) {
   const float distance = hypotf(x1 - x0, y1 - y0);
   const int segments = max(1, static_cast<int>(ceilf(distance / 2.0f)));
@@ -1700,8 +1721,8 @@ void printHelp() {
   Serial.println("  ARM FOLDED | ARM J1 | ARM J2 | DISARM");
   Serial.println("  TEST J1 <steps> | TEST J2 <steps>");
   Serial.println("  J1 <deg> | J2 <deg> | ANGLES <j1> <j2>");
-  Serial.println("  XY <x> <y> [UP|DOWN]");
-  Serial.println("  CUT <x0> <y0> <x1> <y1> [UP|DOWN]");
+  Serial.println("  XY <x> <y> [UP|DOWN] (omitted = AUTO by X side)");
+  Serial.println("  CUT <x0> <y0> <x1> <y1> [UP|DOWN] (omitted = UP)");
   Serial.println("  LOAD POINTS <N> (then N lines: <j1Deg> <j2Deg>)");
   Serial.println("  CUT LOADED (Start/Stop press aborts)");
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
@@ -1898,7 +1919,9 @@ void handleCommand(String command) {
   if (xyFields >= 2) {
     if (!armed || armMode != AxisMode::DUAL) {
       Serial.println("ERROR: XY requires ARM FOLDED");
-    } else if (moveToXY(a, b, xyFields == 3 && parseElbow(option))) {
+    } else if ((xyFields == 3
+                    ? moveToXY(a, b, parseElbow(option))
+                    : moveToXYAuto(a, b))) {
       printPosition();
     }
     return;
