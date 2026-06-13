@@ -48,7 +48,7 @@ constexpr float J1_MAX_DEG = 90.0f;
 constexpr float J2_MIN_DEG = -180.0f;
 constexpr float J2_MAX_DEG = 180.0f;
 constexpr bool INVERT_J1 = false;
-constexpr bool INVERT_J2 = true;
+constexpr bool INVERT_J2 = false;
 
 // Change these three levels only if the driver's input wiring is changed.
 constexpr uint8_t STEP_ACTIVE = HIGH;
@@ -66,7 +66,7 @@ constexpr int J1_SCL_PIN = 19;
 constexpr int J2_SDA_PIN = 16;
 constexpr int J2_SCL_PIN = 17;
 constexpr int ENCODER_J1_SIGN = -1;
-constexpr int ENCODER_J2_SIGN = -1;
+constexpr int ENCODER_J2_SIGN = 1;
 
 // Derive feedback tolerance from motor full-step accuracy through the current
 // microstepping, gearbox ratios, and link lengths. The resulting worst-case
