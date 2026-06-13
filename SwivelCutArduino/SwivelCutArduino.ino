@@ -35,6 +35,11 @@ constexpr float PRODUCT_TEACH_MAX_SECONDS = 60.0f;
 constexpr float PRODUCT_SMOOTHING_MS = 150.0f;
 constexpr float PRODUCT_MAX_DEVIATION_DEG = 1.0f;
 constexpr bool XY_SMOOTHING_IMPLEMENTED = false;
+// false: settle at every taught point; true: stream the path continuously
+// and perform closed-loop settling only at the final point.
+constexpr bool CONTINUOUS_TRAJECTORY_REPLAY = true;
+constexpr float CONTINUOUS_TIMING_MARGIN = 1.05f;
+constexpr long CONTINUOUS_FEEDBACK_STEP_INTERVAL = 256;
 
 constexpr int FULL_STEPS_PER_REV = 200;
 constexpr int MICROSTEP = 4;  // TB6600 DIP switches must also be set to 1/4.
@@ -57,6 +62,8 @@ constexpr uint8_t OUTPUTS_ENABLED = HIGH;
 constexpr uint8_t OUTPUTS_DISABLED = LOW;
 constexpr unsigned long STEP_HALF_PERIOD_US = 1500;
 constexpr unsigned long DIR_SETUP_US = 100;
+constexpr unsigned long CONTINUOUS_MIN_STEP_INTERVAL_US =
+    STEP_HALF_PERIOD_US * 2 + DIR_SETUP_US;
 
 // Encoder branches set this to true. The main branch needs no AS5600 modules.
 constexpr bool USE_ENCODERS = true;
@@ -1150,6 +1157,131 @@ void recordTeach(float seconds, float hz, bool j1Only,
   printOperationReport("TEACH_COMPLETE");
 }
 
+bool serviceContinuousTrajectory() {
+  serviceControlInputs();
+  if (productCutActive && productAbortRequested) {
+    Serial.println("CUT_ABORTED");
+    return false;
+  }
+  return true;
+}
+
+bool waitForContinuousDeadline(unsigned long deadlineUs) {
+  while (static_cast<long>(micros() - deadlineUs) < 0) {
+    if (!serviceContinuousTrajectory()) return false;
+    delayMicroseconds(50);
+  }
+  return serviceContinuousTrajectory();
+}
+
+float continuousTrajectoryTimeScale() {
+  float timeScale = 1.0f;
+  for (int i = 1; i < taughtCount; ++i) {
+    float durationSeconds = taught[i].seconds - taught[i - 1].seconds;
+    if (durationSeconds <= 0.0f) {
+      durationSeconds = 1.0f / PRODUCT_TEACH_HZ;
+    }
+    const long previousJ1 =
+        lroundf(taught[i - 1].j1Deg * J1_STEPS_PER_DEG);
+    const long previousJ2 =
+        lroundf(taught[i - 1].j2Deg * J2_STEPS_PER_DEG);
+    const long targetJ1 = lroundf(taught[i].j1Deg * J1_STEPS_PER_DEG);
+    const long targetJ2 = lroundf(taught[i].j2Deg * J2_STEPS_PER_DEG);
+    const long stepEvents =
+        max(labs(targetJ1 - previousJ1), labs(targetJ2 - previousJ2));
+    const float minimumSeconds =
+        stepEvents * CONTINUOUS_MIN_STEP_INTERVAL_US / 1000000.0f;
+    timeScale = max(
+        timeScale,
+        minimumSeconds * CONTINUOUS_TIMING_MARGIN / durationSeconds);
+  }
+  return timeScale;
+}
+
+bool executeContinuousTrajectory(int &stoppedPoint) {
+  const float timeScale = continuousTrajectoryTimeScale();
+  Serial.print("PLAY MODE: CONTINUOUS TIME_SCALE=");
+  Serial.println(timeScale, 2);
+
+  motorsMoving = true;
+  long stepsSinceFeedback = 0;
+  for (int i = 1; i < taughtCount; ++i) {
+    const long targetJ1 = lroundf(taught[i].j1Deg * J1_STEPS_PER_DEG);
+    const long targetJ2 = lroundf(taught[i].j2Deg * J2_STEPS_PER_DEG);
+    const long deltaJ1 = targetJ1 - j1PositionSteps;
+    const long deltaJ2 = targetJ2 - j2PositionSteps;
+    const long countJ1 = labs(deltaJ1);
+    const long countJ2 = labs(deltaJ2);
+    const long total = max(countJ1, countJ2);
+
+    float durationSeconds = taught[i].seconds - taught[i - 1].seconds;
+    if (durationSeconds <= 0.0f) {
+      durationSeconds = 1.0f / PRODUCT_TEACH_HZ;
+    }
+    unsigned long durationUs = static_cast<unsigned long>(
+        lroundf(durationSeconds * timeScale * 1000000.0f));
+    const unsigned long minimumDurationUs =
+        static_cast<unsigned long>(total) * CONTINUOUS_MIN_STEP_INTERVAL_US;
+    if (durationUs < minimumDurationUs) durationUs = minimumDurationUs;
+
+    setDirection(J1_DIR_PIN, deltaJ1, INVERT_J1);
+    setDirection(J2_DIR_PIN, deltaJ2, INVERT_J2);
+    delayMicroseconds(DIR_SETUP_US);
+    const unsigned long segmentStartedUs = micros();
+    long errorJ1 = 0;
+    long errorJ2 = 0;
+
+    for (long event = 0; event < total; ++event) {
+      const unsigned long deadlineUs =
+          segmentStartedUs + static_cast<unsigned long>(
+              (static_cast<uint64_t>(event) * durationUs) / total);
+      if (!waitForContinuousDeadline(deadlineUs)) {
+        stoppedPoint = i;
+        motorsMoving = false;
+        return false;
+      }
+
+      errorJ1 += countJ1;
+      errorJ2 += countJ2;
+      bool stepJ1 = false;
+      bool stepJ2 = false;
+      if (errorJ1 >= total) {
+        errorJ1 -= total;
+        stepJ1 = true;
+        j1PositionSteps += deltaJ1 >= 0 ? 1 : -1;
+      }
+      if (errorJ2 >= total) {
+        errorJ2 -= total;
+        stepJ2 = true;
+        j2PositionSteps += deltaJ2 >= 0 ? 1 : -1;
+      }
+      pulseSelectedAxes(stepJ1, stepJ2);
+
+      if (!serviceContinuousTrajectory()) {
+        stoppedPoint = i;
+        motorsMoving = false;
+        return false;
+      }
+      if (++stepsSinceFeedback >= CONTINUOUS_FEEDBACK_STEP_INTERVAL) {
+        stepsSinceFeedback = 0;
+        if (!checkFeedback()) {
+          stoppedPoint = i;
+          motorsMoving = false;
+          return false;
+        }
+      }
+    }
+
+    if (!waitForContinuousDeadline(segmentStartedUs + durationUs)) {
+      stoppedPoint = i;
+      motorsMoving = false;
+      return false;
+    }
+  }
+  motorsMoving = false;
+  return true;
+}
+
 bool replayTeach(bool operateBlade = false) {
   if (!USE_ENCODERS || taughtCount == 0) {
     Serial.println("ERROR: no taught movement");
@@ -1179,18 +1311,33 @@ bool replayTeach(bool operateBlade = false) {
     return false;
   }
   if (operateBlade) extendBlade();
-  for (int i = 1; i < taughtCount; ++i) {
-    if (!moveToAngles(taught[i].j1Deg, taught[i].j2Deg, false)) {
-      Serial.print("PLAY STOPPED AT POINT ");
-      Serial.print(i);
-      Serial.print("/");
-      Serial.println(taughtCount - 1);
-      disableDrivers();
-      if (bladeExtended) retractBlade();
-      if (!operateBlade) printOperationReport("PLAY_STOPPED");
-      return false;
+
+  int stoppedPoint = -1;
+  if (CONTINUOUS_TRAJECTORY_REPLAY) {
+    if (!executeContinuousTrajectory(stoppedPoint) ||
+        !moveToAngles(taught[taughtCount - 1].j1Deg,
+                      taught[taughtCount - 1].j2Deg, false)) {
+      if (stoppedPoint < 0) stoppedPoint = taughtCount - 1;
+    }
+  } else {
+    for (int i = 1; i < taughtCount; ++i) {
+      if (!moveToAngles(taught[i].j1Deg, taught[i].j2Deg, false)) {
+        stoppedPoint = i;
+        break;
+      }
     }
   }
+  if (stoppedPoint >= 0) {
+    Serial.print("PLAY STOPPED AT POINT ");
+    Serial.print(stoppedPoint);
+    Serial.print("/");
+    Serial.println(taughtCount - 1);
+    disableDrivers();
+    if (bladeExtended) retractBlade();
+    if (!operateBlade) printOperationReport("PLAY_STOPPED");
+    return false;
+  }
+
   disableDrivers();
   if (bladeExtended) retractBlade();
   Serial.print("PLAYED: ");

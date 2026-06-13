@@ -120,6 +120,16 @@ After `LOAD POINTS <N>`, send exactly N lines containing:
 
 Use `swivelcut_visualizer.html` to generate this package from an SVG.
 
+## Replay Mode
+
+`CONTINUOUS_TRAJECTORY_REPLAY` near the top of the firmware selects the replay
+executor. Its default `true` value paces the taught samples as one continuous
+step stream, with periodic safety feedback checks and closed-loop settling only
+at the final point. Set it to `false` to restore point-by-point motion and
+feedback settling. The continuous executor automatically slows the full
+trajectory when a recorded segment requests more steps than the configured
+pulse timing permits.
+
 ## Stabilization
 
 Joint-space smoothing remains the default. Optional XY smoothing can be enabled
