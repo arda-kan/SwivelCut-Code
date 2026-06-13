@@ -19,6 +19,7 @@ constexpr bool BLADE_REVERSE_TO_RETRACT = true;
 constexpr int START_STOP_BUTTON_PIN = 5;
 constexpr int STABILIZATION_BUTTON_PIN = 22;
 constexpr int REPEAT_BUTTON_PIN = 23;
+constexpr int ARM_TOGGLE_BUTTON_PIN = 21;
 constexpr int HEAD_ID_PIN = 34;
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 35;
 constexpr unsigned long HEAD_SAMPLE_INTERVAL_MS = 20;
@@ -287,6 +288,7 @@ ButtonInput buttons[] = {
     {START_STOP_BUTTON_PIN, 1, "START_STOP", HIGH, HIGH, 0},
     {STABILIZATION_BUTTON_PIN, 2, "STABILIZATION", HIGH, HIGH, 0},
     {REPEAT_BUTTON_PIN, 3, "REPEAT", HIGH, HIGH, 0},
+    {ARM_TOGGLE_BUTTON_PIN, 4, "ARM_TOGGLE", HIGH, HIGH, 0},
 };
 constexpr size_t BUTTON_COUNT = sizeof(buttons) / sizeof(buttons[0]);
 
@@ -321,6 +323,7 @@ void disableDrivers();
 void serviceProductWorkflow();
 void handleProductButtonChange(const ButtonInput &button);
 void printOperationReport(const char *label);
+void armAtFoldedPose(AxisMode mode);
 
 const char *headTypeName(HeadType type) {
   switch (type) {
@@ -372,6 +375,8 @@ void printButtonEvent(const ButtonInput &button) {
             : "STABILIZATION OFF REQUESTED; NO FUNCTION STARTED");
   } else if (button.number == 3) {
     Serial.println("REPEAT REQUESTED; NO FUNCTION STARTED");
+  } else if (button.number == 4) {
+    Serial.println("ARM TOGGLE REQUESTED; NO FUNCTION STARTED");
   }
 }
 
@@ -426,6 +431,8 @@ void printStateTestEvent(const ButtonInput &button) {
     } else {
       Serial.println("REPEATING_LAST_CUT_EVENT");
     }
+  } else if (button.number == 4) {
+    Serial.println("ARM_TOGGLE_TEST_ONLY");
   }
 }
 
@@ -463,9 +470,11 @@ void serviceControlInputs() {
       button.stableState = raw;
       if (controlTestEnabled) printButtonEvent(button);
       if (stateTestEnabled) printStateTestEvent(button);
-      if (!controlTestEnabled && !stateTestEnabled &&
-          productState != ProductState::CUTTING && !motorsMoving) {
-        handleProductButtonChange(button);
+      if (!controlTestEnabled && !stateTestEnabled) {
+        if (button.number == 4 ||
+            (productState != ProductState::CUTTING && !motorsMoving)) {
+          handleProductButtonChange(button);
+        }
       }
     }
   }
@@ -1646,6 +1655,27 @@ void handleProductButtonChange(const ButtonInput &button) {
   const bool pressed = button.stableState == LOW;
   const unsigned long now = millis();
 
+  if (button.number == 4) {
+    if (!pressed) return;
+    if (motorsMoving || productState != ProductState::IDLE) {
+      Serial.println("ARM_TOGGLE_IGNORED_ACTIVE_OPERATION");
+      return;
+    }
+    if (armed || productReady) {
+      disableDrivers();
+      armMode = AxisMode::DUAL;
+      productReady = false;
+      productState = ProductState::IDLE;
+      if (bladeExtended) retractBlade();
+      Serial.println("DISARMED_BY_BUTTON");
+      printOperationReport("DISARMED");
+    } else {
+      Serial.println("ARM_BUTTON: current pose must be physically folded");
+      armAtFoldedPose(AxisMode::DUAL);
+    }
+    return;
+  }
+
   if (button.number == 1) {
     if (!pressed) return;
     if (productState == ProductState::IDLE) {
@@ -1716,6 +1746,7 @@ void printHelp() {
   Serial.println("  Start/Stop + cutter: press once to run the full cut");
   Serial.println("  Stabilization: toggle while idle");
   Serial.println("  Repeat: press once to run the full repeat");
+  Serial.println("  Arm toggle (GPIO21): folded arm / disarm while idle");
   Serial.println("  Product buttons are ignored while motors are moving");
   Serial.println("Commands:");
   Serial.println("  ARM FOLDED | ARM J1 | ARM J2 | DISARM");
@@ -1985,6 +2016,7 @@ void setup() {
   pinMode(START_STOP_BUTTON_PIN, INPUT_PULLUP);
   pinMode(STABILIZATION_BUTTON_PIN, INPUT_PULLUP);
   pinMode(REPEAT_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(ARM_TOGGLE_BUTTON_PIN, INPUT_PULLUP);
   pinMode(HEAD_ID_PIN, INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(HEAD_ID_PIN, ADC_11db);

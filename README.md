@@ -44,6 +44,7 @@ Coordinates use positive X to the physical right and positive Y forward.
 | Start/Stop button | 5 |
 | Stabilization button | 22 |
 | Repeat button | 23 |
+| Arm/Disarm toggle button | 21 |
 | Head-ID ADC | 34 |
 
 Each AS5600 uses address `0x36` on its own ESP32 I2C controller. Power both
