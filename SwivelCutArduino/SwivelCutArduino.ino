@@ -244,6 +244,7 @@ bool encoderStreamEnabled = false;
 float encoderStreamHz = 10.0f;
 unsigned long nextEncoderStreamMs = 0;
 String inputLine;
+char commandTerminator = '\0';
 
 ButtonInput buttons[] = {
     {START_STOP_BUTTON_PIN, 1, "START_STOP", HIGH, HIGH, 0},
@@ -1303,6 +1304,108 @@ void runProductCut(bool repeat, bool requireStartHeld) {
           : (repeat ? "REPEAT_STOPPED" : "CUT_STOPPED"));
 }
 
+void loadPointsFromSerial(long requestedCount) {
+  if (requestedCount <= 1 || requestedCount > MAX_TEACH_POINTS) {
+    Serial.print("ERROR: LOAD POINTS count out of range (1-");
+    Serial.print(MAX_TEACH_POINTS);
+    Serial.println(")");
+    return;
+  }
+  if (!armed || armMode != AxisMode::DUAL) {
+    Serial.println(
+        "ERROR: LOAD POINTS requires ARM FOLDED before reading any point lines");
+    return;
+  }
+
+  inputLine = "";
+  if (commandTerminator == '\r') {
+    delay(1);
+    if (Serial.available() > 0 && Serial.peek() == '\n') Serial.read();
+  }
+  const int pointCount = static_cast<int>(requestedCount);
+  for (int i = 0; i < pointCount; ++i) {
+    String pointLine = Serial.readStringUntil('\n');
+    pointLine.trim();
+    float j1Deg = 0.0f;
+    float j2Deg = 0.0f;
+    char trailing = '\0';
+    if (sscanf(pointLine.c_str(), "%f %f %c",
+               &j1Deg, &j2Deg, &trailing) != 2) {
+      taughtCount = 0;
+      inputLine = "";
+      Serial.print("ERROR: LOAD POINTS bad point at line ");
+      Serial.println(i);
+      return;
+    }
+    rawTaught[i] = {
+        i / PRODUCT_TEACH_HZ, j1Deg, j2Deg};
+  }
+  inputLine = "";
+
+  taughtCount = pointCount;
+  taughtJ1Only = false;
+  for (int i = 0; i < taughtCount; ++i) {
+    if (!angleInRange(rawTaught[i].j1Deg, rawTaught[i].j2Deg)) {
+      Serial.print("ERROR: LOAD POINTS point ");
+      Serial.print(i);
+      Serial.print(" out of range J1=");
+      Serial.print(rawTaught[i].j1Deg, 2);
+      Serial.print(" J2=");
+      Serial.println(rawTaught[i].j2Deg, 2);
+      taughtCount = 0;
+      return;
+    }
+  }
+  if (!validateRawTeachPath(false)) return;
+
+  productHasLastCut = false;
+  prepareTaughtPath(0.0f, 0.0f);
+  Serial.print("LOADED: ");
+  Serial.print(taughtCount);
+  Serial.print(" points, J1 ");
+  Serial.print(taught[0].j1Deg, 2);
+  Serial.print(" -> ");
+  Serial.print(taught[taughtCount - 1].j1Deg, 2);
+  Serial.println("; type PLAY or CUT LOADED");
+  printOperationReport("LOAD_COMPLETE");
+}
+
+void cutLoadedPath() {
+  if (!productReady || !encodersCalibrated ||
+      encoderMode != AxisMode::DUAL) {
+    Serial.println("ERROR_PRODUCT_NOT_READY_USE_ARM_FOLDED");
+    return;
+  }
+  if (!headTypeInitialized || stableHeadType != HeadType::CUTTING) {
+    Serial.println("ERROR_CUTTER_HEAD_REQUIRED");
+    return;
+  }
+  if (taughtCount < 2) {
+    Serial.println("ERROR_NO_TRACED_PATH");
+    return;
+  }
+
+  taughtJ1Only = false;
+  productState = ProductState::CUTTING;
+  productCutActive = true;
+  productAbortRequested = false;
+  productCutRequiresHold = true;
+  Serial.println("CUTTING_STARTED");
+  const bool completed = replayTeach(true);
+  productCutActive = false;
+  productCutRequiresHold = false;
+  productState = ProductState::IDLE;
+  disableDrivers();
+  if (bladeExtended) retractBlade();
+  if (completed) {
+    productHasLastCut = true;
+    Serial.println("CUT_COMPLETE");
+  } else {
+    Serial.println("CUT_STOPPED");
+  }
+  printOperationReport(completed ? "CUT_COMPLETE" : "CUT_STOPPED");
+}
+
 void handleProductButtonChange(const ButtonInput &button) {
   const bool pressed = button.stableState == LOW;
   const unsigned long now = millis();
@@ -1385,6 +1488,8 @@ void printHelp() {
   Serial.println("  J1 <deg> | J2 <deg> | ANGLES <j1> <j2>");
   Serial.println("  XY <x> <y> [UP|DOWN]");
   Serial.println("  CUT <x0> <y0> <x1> <y1> [UP|DOWN]");
+  Serial.println("  LOAD POINTS <N> (then N lines: <j1Deg> <j2Deg>)");
+  Serial.println("  CUT LOADED (hold Start/Stop to continue)");
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
   Serial.println("  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>");
   Serial.println("  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS");
@@ -1473,6 +1578,17 @@ void handleCommand(String command) {
   }
   if (command == "PLAY") {
     replayTeach();
+    return;
+  }
+  if (command == "CUT LOADED") {
+    cutLoadedPath();
+    return;
+  }
+  long loadPointCount = 0;
+  char loadTrailing = '\0';
+  if (sscanf(command.c_str(), "LOAD POINTS %ld %c",
+             &loadPointCount, &loadTrailing) == 1) {
+    loadPointsFromSerial(loadPointCount);
     return;
   }
   if (command == "FEEDBACK ON") {
@@ -1671,6 +1787,7 @@ void loop() {
     const char incoming = static_cast<char>(Serial.read());
     if (incoming == '\n' || incoming == '\r') {
       if (inputLine.length() > 0) {
+        commandTerminator = incoming;
         handleCommand(inputLine);
         inputLine = "";
       }
