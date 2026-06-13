@@ -95,6 +95,7 @@ constexpr float FEEDBACK_TOLERANCE_DEG =
     FEEDBACK_TOLERANCE_FACTOR;
 constexpr float FEEDBACK_MAX_ERROR_DEG = 10.0f;
 constexpr int FEEDBACK_MAX_CORRECTIONS = 3;
+constexpr float TEACH_LIMIT_NOISE_MARGIN_DEG = 1.0f;
 constexpr int MAX_TEACH_POINTS = USE_ENCODERS ? 3000 : 1;
 
 constexpr float J1_STEPS_PER_DEG =
@@ -1157,7 +1158,11 @@ bool replayTeach(bool operateBlade = false) {
   Serial.print("PLAY RETURN: J1 ");
   Serial.print(measuredJ1, 2);
   Serial.print(" -> ");
-  Serial.println(taught[0].j1Deg, 2);
+  Serial.print(taught[0].j1Deg, 2);
+  Serial.print("; J2 ");
+  Serial.print(measuredJ2, 2);
+  Serial.print(" -> ");
+  Serial.println(taught[0].j2Deg, 2);
   if (!moveToAngles(taught[0].j1Deg, taught[0].j2Deg, false)) {
     disableDrivers();
     return false;
@@ -1185,6 +1190,32 @@ bool replayTeach(bool operateBlade = false) {
 }
 
 bool validateRawTeachPath(bool j1Only) {
+  for (int i = 0; i < taughtCount; ++i) {
+    const bool j1NearRange =
+        rawTaught[i].j1Deg >= J1_MIN_DEG - TEACH_LIMIT_NOISE_MARGIN_DEG &&
+        rawTaught[i].j1Deg <= J1_MAX_DEG + TEACH_LIMIT_NOISE_MARGIN_DEG;
+    const bool j2NearRange =
+        j1Only ||
+        (rawTaught[i].j2Deg >= J2_MIN_DEG - TEACH_LIMIT_NOISE_MARGIN_DEG &&
+         rawTaught[i].j2Deg <= J2_MAX_DEG + TEACH_LIMIT_NOISE_MARGIN_DEG);
+    if (!j1NearRange || !j2NearRange) {
+      Serial.print("TEACH_REJECTED_OUT_OF_RANGE POINT=");
+      Serial.print(i);
+      Serial.print(" J1=");
+      Serial.print(rawTaught[i].j1Deg, 2);
+      Serial.print(" J2=");
+      Serial.println(rawTaught[i].j2Deg, 2);
+      taughtCount = 0;
+      return false;
+    }
+    rawTaught[i].j1Deg =
+        constrain(rawTaught[i].j1Deg, J1_MIN_DEG, J1_MAX_DEG);
+    if (!j1Only) {
+      rawTaught[i].j2Deg =
+          constrain(rawTaught[i].j2Deg, J2_MIN_DEG, J2_MAX_DEG);
+    }
+  }
+
   for (int i = 1; i < taughtCount; ++i) {
     const float jumpJ1 =
         fabsf(rawTaught[i].j1Deg - rawTaught[i - 1].j1Deg);
