@@ -66,7 +66,7 @@ constexpr int J1_SCL_PIN = 19;
 constexpr int J2_SDA_PIN = 16;
 constexpr int J2_SCL_PIN = 17;
 constexpr int ENCODER_J1_SIGN = -1;
-constexpr int ENCODER_J2_SIGN = 1;
+constexpr int ENCODER_J2_SIGN = -1;
 
 // Derive feedback tolerance from motor full-step accuracy through the current
 // microstepping, gearbox ratios, and link lengths. The resulting worst-case
