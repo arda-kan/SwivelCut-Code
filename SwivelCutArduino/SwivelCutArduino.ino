@@ -296,7 +296,6 @@ bool stabilizationEnabled = false;
 bool bladeExtended = false;
 bool productCutActive = false;
 bool productAbortRequested = false;
-bool productCutRequiresHold = false;
 bool productHasLastCut = false;
 unsigned long productTeachStartedMs = 0;
 unsigned long nextProductTeachSampleMs = 0;
@@ -751,10 +750,6 @@ bool executeSteps(long deltaJ1, long deltaJ2) {
     serviceControlInputs();
     serviceEncoderStream();
     if (productCutActive) {
-      if (productCutRequiresHold &&
-          digitalRead(START_STOP_BUTTON_PIN) == HIGH) {
-        productAbortRequested = true;
-      }
       if (classifyHeadAdc(analogRead(HEAD_ID_PIN)) != HeadType::CUTTING) {
         productAbortRequested = true;
       }
@@ -1250,7 +1245,7 @@ void startProductTeach(unsigned long now) {
   }
   nextProductTeachSampleMs =
       now + static_cast<unsigned long>(1000.0f / PRODUCT_TEACH_HZ);
-  Serial.println("TRACING_STARTED_HOLD_BUTTON");
+  Serial.println("TRACING_STARTED_PRESS_AGAIN_TO_STOP");
 }
 
 void stopProductTeach(unsigned long now) {
@@ -1287,7 +1282,7 @@ void stopProductTeach(unsigned long now) {
   printOperationReport("TRACING_COMPLETE");
 }
 
-void runProductCut(bool repeat, bool requireStartHeld) {
+void runProductCut(bool repeat) {
   if (!productReady || !encodersCalibrated ||
       encoderMode != AxisMode::DUAL) {
     Serial.println("ERROR_PRODUCT_NOT_READY_USE_ARM_FOLDED");
@@ -1313,13 +1308,11 @@ void runProductCut(bool repeat, bool requireStartHeld) {
   productState = ProductState::CUTTING;
   productCutActive = true;
   productAbortRequested = false;
-  productCutRequiresHold = requireStartHeld;
   Serial.print(repeat ? "REPEATING_LAST_CUT" : "CUTTING_STARTED");
   Serial.println(
       stabilizationEnabled ? "_WITH_STABILIZATION" : "");
   const bool completed = replayTeach(true);
   productCutActive = false;
-  productCutRequiresHold = false;
   productState = ProductState::IDLE;
   disableDrivers();
   if (bladeExtended) retractBlade();
@@ -1420,11 +1413,9 @@ void cutLoadedPath() {
   productState = ProductState::CUTTING;
   productCutActive = true;
   productAbortRequested = false;
-  productCutRequiresHold = true;
   Serial.println("CUTTING_STARTED");
   const bool completed = replayTeach(true);
   productCutActive = false;
-  productCutRequiresHold = false;
   productState = ProductState::IDLE;
   disableDrivers();
   if (bladeExtended) retractBlade();
@@ -1442,23 +1433,21 @@ void handleProductButtonChange(const ButtonInput &button) {
   const unsigned long now = millis();
 
   if (button.number == 1) {
-    if (pressed) {
-      if (productState == ProductState::IDLE) {
-        if (headTypeInitialized && stableHeadType == HeadType::TRACING) {
-          startProductTeach(now);
-        } else if (headTypeInitialized &&
-                   stableHeadType == HeadType::CUTTING) {
-          runProductCut(false, true);
-        } else {
-          Serial.println("ERROR_RECOGNIZED_HEAD_REQUIRED");
-        }
+    if (!pressed) return;
+    if (productState == ProductState::IDLE) {
+      if (headTypeInitialized && stableHeadType == HeadType::TRACING) {
+        startProductTeach(now);
+      } else if (headTypeInitialized &&
+                 stableHeadType == HeadType::CUTTING) {
+        runProductCut(false);
+      } else {
+        Serial.println("ERROR_RECOGNIZED_HEAD_REQUIRED");
       }
     } else if (productState == ProductState::TEACHING) {
       stopProductTeach(now);
-    } else if (productState == ProductState::CUTTING &&
-               productCutRequiresHold) {
+    } else if (productState == ProductState::CUTTING) {
       productAbortRequested = true;
-      Serial.println("CUT_ABORT_REQUESTED_BUTTON_RELEASED");
+      Serial.println("CUT_ABORT_REQUESTED_BUTTON_PRESSED");
     }
     return;
   }
@@ -1477,7 +1466,7 @@ void handleProductButtonChange(const ButtonInput &button) {
       Serial.println("REPEAT_IGNORED_ACTIVE_OPERATION");
       return;
     }
-    runProductCut(true, false);
+    runProductCut(true);
   }
 }
 
@@ -1509,8 +1498,8 @@ bool parseElbow(const char *text) {
 
 void printHelp() {
   Serial.println("Physical product controls after ARM FOLDED:");
-  Serial.println("  Hold Start/Stop + tracer: record; release: stop");
-  Serial.println("  Hold Start/Stop + cutter: cut; release: abort");
+  Serial.println("  Start/Stop + tracer: press to start/stop recording");
+  Serial.println("  Start/Stop + cutter: press to start/stop cutting");
   Serial.println("  Stabilization: toggle while idle");
   Serial.println("  Repeat: repeat the last completed cut");
   Serial.println("Commands:");
@@ -1520,7 +1509,7 @@ void printHelp() {
   Serial.println("  XY <x> <y> [UP|DOWN]");
   Serial.println("  CUT <x0> <y0> <x1> <y1> [UP|DOWN]");
   Serial.println("  LOAD POINTS <N> (then N lines: <j1Deg> <j2Deg>)");
-  Serial.println("  CUT LOADED (hold Start/Stop to continue)");
+  Serial.println("  CUT LOADED (Start/Stop press aborts)");
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
   Serial.println("  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>");
   Serial.println("  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS");

@@ -69,14 +69,14 @@ Five consistent readings are required before a head change is accepted.
 
 1. Fold the arm and send `ARM FOLDED`.
 2. Install the tracer head.
-3. Hold Start/Stop to record; release it to stop.
+3. Press Start/Stop once to begin recording and press it again to stop.
 4. Install the cutter head.
 5. Optionally toggle Stabilization while idle.
-6. Hold Start/Stop to cut; releasing it aborts.
+6. Press Start/Stop once to begin cutting and press it again to stop.
 7. Press Repeat to repeat the last completed cut.
 
 Head removal during teaching discards the incomplete trace. Head removal or
-Start/Stop release during a cut aborts motion and retracts the blade.
+another Start/Stop press during a cut aborts motion and retracts the blade.
 
 The firmware prints a `REPORT` after operations with software J1/J2, XY,
 encoder J1/J2, and raw encoder counts.
