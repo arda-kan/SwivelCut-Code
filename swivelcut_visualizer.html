@@ -401,9 +401,9 @@ function forwardKinematics(j1Deg, j2Deg) {
   const t1 = radians(j1Deg);
   const t2 = radians(j2Deg);
   const y = LINK_1_MM * Math.cos(t1) +
-            LINK_2_MM * Math.cos(t1 + t2);
-  const x = LINK_1_MM * Math.sin(t1) +
-            LINK_2_MM * Math.sin(t1 + t2);
+            LINK_2_MM * Math.cos(t2 - t1);
+  const x = -LINK_1_MM * Math.sin(t1) +
+            LINK_2_MM * Math.sin(t2 - t1);
   return { x, y };
 }
 
@@ -429,7 +429,7 @@ function inverseKinematicsDetailed(x, y, elbowDown) {
   const t2 = Math.atan2(s2, c2);
   const t1 = Math.atan2(x, y) -
              Math.atan2(LINK_2_MM * s2, LINK_1_MM + LINK_2_MM * c2);
-  const j1Deg = degrees(t1);
+  const j1Deg = -degrees(t1);
   const j2Deg = degrees(t2);
   if (!angleInRange(j1Deg, j2Deg)) {
     const failures = [];

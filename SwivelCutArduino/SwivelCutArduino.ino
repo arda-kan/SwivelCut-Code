@@ -850,8 +850,8 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
 void forwardKinematics(float j1Deg, float j2Deg, float &x, float &y) {
   const float t1 = radians(j1Deg);
   const float t2 = radians(j2Deg);
-  y = LINK_1_MM * cosf(t1) + LINK_2_MM * cosf(t1 + t2);
-  x = LINK_1_MM * sinf(t1) + LINK_2_MM * sinf(t1 + t2);
+  y = LINK_1_MM * cosf(t1) + LINK_2_MM * cosf(t2 - t1);
+  x = -LINK_1_MM * sinf(t1) + LINK_2_MM * sinf(t2 - t1);
 }
 
 void printOperationReport(const char *label) {
@@ -915,7 +915,7 @@ bool inverseKinematics(float x, float y, bool elbowDown,
   const float t2 = atan2f(s2, c2);
   const float t1 = atan2f(x, y) -
                    atan2f(LINK_2_MM * s2, LINK_1_MM + LINK_2_MM * c2);
-  j1Deg = degrees(t1);
+  j1Deg = -degrees(t1);
   j2Deg = degrees(t2);
   return angleInRange(j1Deg, j2Deg);
 }
@@ -1008,7 +1008,7 @@ void stabilizeTeachPointsXY(float smoothingMs, float maxDeviationDeg) {
     const float maxDeviationMm = radians(maxDeviationDeg) * reachMm;
     const float windowsMs[] = {
         smoothingMs, smoothingMs * 0.5f, smoothingMs * 0.25f, 0.0f};
-    const bool elbowDown = rawTaught[i].j2Deg - 180.0f < 0.0f;
+    const bool elbowDown = rawTaught[i].j2Deg < 0.0f;
     bool solved = false;
 
     for (size_t attempt = 0;

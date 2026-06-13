@@ -24,6 +24,8 @@ Both HTML tools are self-contained and can be opened directly in a browser.
 - Folded startup pose: J1 = 0 degrees, J2 = 180 degrees
 - J1 limits: -90 to +90 degrees
 - J2 limits: -180 to +180 degrees
+- Arm coordinates: `J1=-90, J2=0` is `X=400, Y=0`;
+  `J1=90, J2=0` is `X=-400, Y=0`
 
 Coordinates use positive X to the physical right and positive Y forward.
 

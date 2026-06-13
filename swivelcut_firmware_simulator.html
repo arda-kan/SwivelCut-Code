@@ -331,8 +331,8 @@ function angleInRange(j1Deg, j2Deg) {
 function forwardKinematics(j1Deg, j2Deg) {
   const t1 = radians(j1Deg);
   const t2 = radians(j2Deg);
-  const y = C.LINK_1_MM * Math.cos(t1) + C.LINK_2_MM * Math.cos(t1 + t2);
-  const x = C.LINK_1_MM * Math.sin(t1) + C.LINK_2_MM * Math.sin(t1 + t2);
+  const y = C.LINK_1_MM * Math.cos(t1) + C.LINK_2_MM * Math.cos(t2 - t1);
+  const x = -C.LINK_1_MM * Math.sin(t1) + C.LINK_2_MM * Math.sin(t2 - t1);
   return { x, y };
 }
 
@@ -346,7 +346,7 @@ function inverseKinematics(x, y, elbowDown) {
   const t2 = Math.atan2(s2, c2);
   const t1 = Math.atan2(x, y) -
              Math.atan2(C.LINK_2_MM * s2, C.LINK_1_MM + C.LINK_2_MM * c2);
-  const j1Deg = degrees(t1);
+  const j1Deg = -degrees(t1);
   const j2Deg = degrees(t2);
   return angleInRange(j1Deg, j2Deg) ? { j1Deg, j2Deg } : null;
 }
@@ -612,7 +612,7 @@ function stabilizeTeachPointsXY(smoothingMs, maxDeviationDeg) {
     const reachMm = Math.max(Math.hypot(rawX, rawY), 20.0);
     const maxDeviationMm = radians(maxDeviationDeg) * reachMm;
     const windowsMs = [smoothingMs, smoothingMs * 0.5, smoothingMs * 0.25, 0.0];
-    const elbowDown = state.rawTaught[i].j2Deg - 180.0 < 0.0;
+    const elbowDown = state.rawTaught[i].j2Deg < 0.0;
     let solved = false;
 
     for (let attempt = 0; attempt < windowsMs.length; ++attempt) {
@@ -1043,7 +1043,7 @@ function displayedPose() {
 function renderArm() {
   const pose = displayedPose();
   const t1 = radians(pose.j1Deg);
-  const elbowX = C.LINK_1_MM * Math.sin(t1);
+  const elbowX = -C.LINK_1_MM * Math.sin(t1);
   const elbowY = C.LINK_1_MM * Math.cos(t1);
   const tip = forwardKinematics(pose.j1Deg, pose.j2Deg);
   $("link1").setAttribute("x2", elbowX);
