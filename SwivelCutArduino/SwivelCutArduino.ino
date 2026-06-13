@@ -67,7 +67,30 @@ constexpr int J2_SDA_PIN = 16;
 constexpr int J2_SCL_PIN = 17;
 constexpr int ENCODER_J1_SIGN = -1;
 constexpr int ENCODER_J2_SIGN = 1;
-constexpr float FEEDBACK_TOLERANCE_DEG = 0.25f;
+
+// Derive feedback tolerance from motor full-step accuracy through the current
+// microstepping, gearbox ratios, and link lengths. The resulting worst-case
+// tip error is converted back to an arm-wide angular tolerance and floored at
+// one AS5600 count so the correction loop never targets sub-sensor resolution.
+constexpr float MOTOR_FULL_STEP_DEG = 1.8f;
+constexpr float MOTOR_STEP_ACCURACY_PCT = 0.05f;
+constexpr float MOTOR_STEP_ERROR_DEG =
+    MOTOR_FULL_STEP_DEG * MOTOR_STEP_ACCURACY_PCT;
+constexpr float MOTOR_MICROSTEP_ERROR_DEG =
+    MOTOR_STEP_ERROR_DEG / MICROSTEP;
+constexpr float J1_JOINT_ERROR_DEG =
+    MOTOR_MICROSTEP_ERROR_DEG / J1_GEAR_RATIO;
+constexpr float J2_JOINT_ERROR_DEG =
+    MOTOR_MICROSTEP_ERROR_DEG / J2_GEAR_RATIO;
+constexpr float TIP_ERROR_MM =
+    LINK_1_MM * radians(J1_JOINT_ERROR_DEG) +
+    LINK_2_MM * radians(J2_JOINT_ERROR_DEG);
+constexpr float ARM_REACH_MM = LINK_1_MM + LINK_2_MM;
+constexpr float FEEDBACK_TOLERANCE_DEG_RAW =
+    degrees(TIP_ERROR_MM / ARM_REACH_MM);
+constexpr float AS5600_RESOLUTION_DEG = 360.0f / 4096.0f;
+constexpr float FEEDBACK_TOLERANCE_DEG =
+    max(FEEDBACK_TOLERANCE_DEG_RAW, AS5600_RESOLUTION_DEG);
 constexpr float FEEDBACK_MAX_ERROR_DEG = 10.0f;
 constexpr int FEEDBACK_MAX_CORRECTIONS = 3;
 constexpr int MAX_TEACH_POINTS = USE_ENCODERS ? 3000 : 1;
