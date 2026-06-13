@@ -34,6 +34,7 @@ constexpr float PRODUCT_TEACH_HZ = 20.0f;
 constexpr float PRODUCT_TEACH_MAX_SECONDS = 60.0f;
 constexpr float PRODUCT_SMOOTHING_MS = 150.0f;
 constexpr float PRODUCT_MAX_DEVIATION_DEG = 1.0f;
+constexpr bool XY_SMOOTHING_IMPLEMENTED = false;
 
 constexpr int FULL_STEPS_PER_REV = 200;
 constexpr int MICROSTEP = 4;  // TB6600 DIP switches must also be set to 1/4.
@@ -946,9 +947,64 @@ void stabilizeTeachPoints(float smoothingMs, float maxDeviationDeg) {
   }
 }
 
+void stabilizeTeachPointsXY(float smoothingMs, float maxDeviationDeg) {
+  if (taughtCount < 3 || smoothingMs <= 0.0f) return;
+
+  for (int i = 0; i < taughtCount; ++i) {
+    teachScratch[i].seconds = rawTaught[i].seconds;
+    forwardKinematics(rawTaught[i].j1Deg, rawTaught[i].j2Deg,
+                      teachScratch[i].j1Deg, teachScratch[i].j2Deg);
+  }
+
+  const float maxDeviationMm =
+      radians(maxDeviationDeg) * (LINK_1_MM + LINK_2_MM);
+  for (int i = 0; i < taughtCount; ++i) {
+    float sumX = 0.0f;
+    float sumY = 0.0f;
+    int count = 0;
+    for (int j = 0; j < taughtCount; ++j) {
+      if (fabsf((teachScratch[j].seconds - teachScratch[i].seconds) *
+                1000.0f) <= smoothingMs) {
+        sumX += teachScratch[j].j1Deg;
+        sumY += teachScratch[j].j2Deg;
+        ++count;
+      }
+    }
+
+    float smoothX = sumX / count;
+    float smoothY = sumY / count;
+    if (maxDeviationDeg > 0.0f) {
+      smoothX = constrain(smoothX,
+                          teachScratch[i].j1Deg - maxDeviationMm,
+                          teachScratch[i].j1Deg + maxDeviationMm);
+      smoothY = constrain(smoothY,
+                          teachScratch[i].j2Deg - maxDeviationMm,
+                          teachScratch[i].j2Deg + maxDeviationMm);
+    }
+
+    float smoothJ1 = 0.0f;
+    float smoothJ2 = 0.0f;
+    const bool elbowDown = rawTaught[i].j2Deg - 180.0f < 0.0f;
+    if (inverseKinematics(smoothX, smoothY, elbowDown,
+                          smoothJ1, smoothJ2)) {
+      taught[i].j1Deg = smoothJ1;
+      taught[i].j2Deg = smoothJ2;
+    } else {
+      taught[i].j1Deg = rawTaught[i].j1Deg;
+      taught[i].j2Deg = rawTaught[i].j2Deg;
+      Serial.print("XY_SMOOTH_FALLBACK point=");
+      Serial.println(i);
+    }
+  }
+}
+
 void prepareTaughtPath(float smoothingMs, float maxDeviationDeg) {
   memcpy(taught, rawTaught, taughtCount * sizeof(TeachPoint));
-  stabilizeTeachPoints(smoothingMs, maxDeviationDeg);
+  if (XY_SMOOTHING_IMPLEMENTED) {
+    stabilizeTeachPointsXY(smoothingMs, maxDeviationDeg);
+  } else {
+    stabilizeTeachPoints(smoothingMs, maxDeviationDeg);
+  }
   if (taughtCount > 0) {
     taught[0] = rawTaught[0];
     taught[taughtCount - 1] = rawTaught[taughtCount - 1];

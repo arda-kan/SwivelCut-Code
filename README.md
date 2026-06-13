@@ -158,6 +158,11 @@ Changing/removing the cutter during a cut aborts motion and retracts the blade.
 Stabilization always starts from the untouched raw trace, so toggling it does
 not permanently modify the recorded path.
 
+`XY_SMOOTHING_IMPLEMENTED` defaults to `false`, preserving the existing
+joint-angle smoothing. When enabled, stabilization averages the path in XY
+space and converts `maxDeviationDeg` to millimetres as an arc-length bound:
+`degrees * PI / 180 * (LINK_1_MM + LINK_2_MM)`.
+
 The blade H-bridge uses GPIO13/GPIO14. A cut pulses the actuator forward for
 500 ms to extend and reverse for 500 ms to retract. These timings do not prove
 blade position; initial testing must be done with the blade removed. Limit
