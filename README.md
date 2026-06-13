@@ -137,6 +137,36 @@ been started and stopped. If persistent stabilization is enabled, it prints
 `REPEATING_LAST_CUT_EVENT_WITH_STABILIZATION`. Repeat does nothing during an
 active event or before a completed cut exists. Use `STATE TEST OFF` to exit.
 
+### Physical button workflow
+
+After physically folding the arm, run `ARM FOLDED`. This calibrates both
+encoders and enables the real product-button workflow:
+
+1. Fit the tracer head.
+2. Hold Start/Stop to record the guided path. Recording starts on the debounced
+   press and stops when the button is released.
+3. Fit the cutter head.
+4. Optionally press Stabilization while idle. The setting remains active for
+   every later cut and repeat until pressed again while idle.
+5. Hold Start/Stop to cut the last traced path. Releasing Start/Stop aborts the
+   cut, disables the drivers, and retracts the blade.
+6. Press Repeat to repeat the last successfully completed cut. Repeat does not
+   require the Start/Stop button to remain held.
+
+Changing/removing the tracer while recording discards the incomplete trace.
+Changing/removing the cutter during a cut aborts motion and retracts the blade.
+Stabilization always starts from the untouched raw trace, so toggling it does
+not permanently modify the recorded path.
+
+The blade H-bridge uses GPIO13/GPIO14. A cut pulses the actuator forward for
+500 ms to extend and reverse for 500 ms to retract. These timings do not prove
+blade position; initial testing must be done with the blade removed. Limit
+switches or blade-position feedback are strongly recommended for production.
+
+After every move, trace, cut, repeat, abort, arm, and disarm operation, the
+firmware prints a `REPORT` line containing software J1/J2, calculated X/Y,
+measured encoder J1/J2, and raw AS5600 counts when available.
+
 Positive joint angles are counterclockwise when viewed from above the cutting
 plane. J1 uses the normal driver direction and J2 is inverted to match the
 installed motor and belt direction. This changes only the electrical direction

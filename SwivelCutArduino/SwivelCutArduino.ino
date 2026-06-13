@@ -13,6 +13,8 @@ constexpr int J2_DIR_PIN = 33;
 constexpr int ENA_PIN = 27;
 constexpr int BLADE_IN1_PIN = 13;
 constexpr int BLADE_IN2_PIN = 14;
+constexpr unsigned long BLADE_DRIVE_MS = 500;
+constexpr bool BLADE_REVERSE_TO_RETRACT = true;
 
 constexpr int START_STOP_BUTTON_PIN = 5;
 constexpr int STABILIZATION_BUTTON_PIN = 22;
@@ -28,6 +30,10 @@ constexpr int CUTTING_HEAD_ADC_MAX = 1125;
 constexpr int TRACING_HEAD_ADC_MIN = 1500;
 constexpr int TRACING_HEAD_ADC_MAX = 2550;
 constexpr int HEAD_DISCONNECTED_ADC_MIN = 3500;
+constexpr float PRODUCT_TEACH_HZ = 20.0f;
+constexpr float PRODUCT_TEACH_MAX_SECONDS = 60.0f;
+constexpr float PRODUCT_SMOOTHING_MS = 150.0f;
+constexpr float PRODUCT_MAX_DEVIATION_DEG = 1.0f;
 
 constexpr int FULL_STEPS_PER_REV = 200;
 constexpr int MICROSTEP = 4;  // TB6600 DIP switches must also be set to 1/4.
@@ -53,7 +59,6 @@ constexpr unsigned long DIR_SETUP_US = 100;
 
 // Encoder branches set this to true. The main branch needs no AS5600 modules.
 constexpr bool USE_ENCODERS = true;
-constexpr bool STABILIZE_TEACH = false;
 constexpr uint8_t AS5600_ADDRESS = 0x36;
 constexpr int J1_SDA_PIN = 16;
 constexpr int J1_SCL_PIN = 17;
@@ -91,6 +96,12 @@ enum class HeadType {
   CUTTING,
   TRACING,
   DISCONNECTED,
+};
+
+enum class ProductState {
+  IDLE,
+  TEACHING,
+  CUTTING,
 };
 
 class AS5600Tracker {
@@ -214,6 +225,7 @@ TwoWire j2Wire(1);
 AS5600Tracker j1Encoder(j1Wire, ENCODER_J1_SIGN);
 AS5600Tracker j2Encoder(j2Wire, ENCODER_J2_SIGN);
 TeachPoint taught[MAX_TEACH_POINTS];
+TeachPoint rawTaught[MAX_TEACH_POINTS];
 TeachPoint teachScratch[MAX_TEACH_POINTS];
 
 long j1PositionSteps = 0;
@@ -252,11 +264,24 @@ bool testTeachingActive = false;
 bool testStabilizationEnabled = false;
 bool testHasLastCut = false;
 HeadType testActiveHead = HeadType::UNKNOWN;
+ProductState productState = ProductState::IDLE;
+bool productReady = false;
+bool stabilizationEnabled = false;
+bool bladeExtended = false;
+bool productCutActive = false;
+bool productAbortRequested = false;
+bool productCutRequiresHold = false;
+bool productHasLastCut = false;
+unsigned long productTeachStartedMs = 0;
+unsigned long nextProductTeachSampleMs = 0;
 
 float currentJ1Deg() { return j1PositionSteps / J1_STEPS_PER_DEG; }
 float currentJ2Deg() { return j2PositionSteps / J2_STEPS_PER_DEG; }
 
 void disableDrivers();
+void serviceProductWorkflow();
+void handleProductButtonChange(const ButtonInput &button);
+void printOperationReport(const char *label);
 
 const char *headTypeName(HeadType type) {
   switch (type) {
@@ -399,6 +424,9 @@ void serviceControlInputs() {
       button.stableState = raw;
       if (controlTestEnabled) printButtonEvent(button);
       if (stateTestEnabled) printStateTestEvent(button);
+      if (!controlTestEnabled && !stateTestEnabled) {
+        handleProductButtonChange(button);
+      }
     }
   }
 
@@ -419,11 +447,26 @@ void serviceControlInputs() {
       (!headTypeInitialized || candidateHeadType != stableHeadType)) {
     stableHeadType = candidateHeadType;
     headTypeInitialized = true;
+    Serial.print("HEAD ");
+    Serial.print(headTypeName(stableHeadType));
+    Serial.print(" ADC=");
+    Serial.println(latestHeadAdc);
     if (controlTestEnabled) {
-      Serial.print("HEAD ");
-      Serial.print(headTypeName(stableHeadType));
-      Serial.print(" ADC=");
-      Serial.println(latestHeadAdc);
+      // The general head-change line above is also useful in wiring test mode.
+    } else if (!stateTestEnabled) {
+      if (productState == ProductState::TEACHING &&
+          stableHeadType != HeadType::TRACING) {
+        taughtCount = 0;
+        productState = ProductState::IDLE;
+        Serial.println(
+            "TEACHING_STOPPED_HEAD_CHANGED PATH_DISCARDED");
+        printOperationReport("TRACING_STOPPED_HEAD_CHANGED");
+      }
+      if (productState == ProductState::CUTTING &&
+          stableHeadType != HeadType::CUTTING) {
+        productAbortRequested = true;
+        Serial.println("CUT_ABORT_REQUESTED_HEAD_CHANGED");
+      }
     }
   }
 
@@ -492,6 +535,34 @@ void setStateTest(bool enabled) {
   Serial.println("NOT_DOING_ANYTHING");
 }
 
+void stopBlade() {
+  digitalWrite(BLADE_IN1_PIN, LOW);
+  digitalWrite(BLADE_IN2_PIN, LOW);
+}
+
+void driveBlade(uint8_t in1, uint8_t in2) {
+  digitalWrite(BLADE_IN1_PIN, in1);
+  digitalWrite(BLADE_IN2_PIN, in2);
+  delay(BLADE_DRIVE_MS);
+  stopBlade();
+}
+
+void extendBlade() {
+  Serial.println("BLADE_EXTENDING");
+  driveBlade(HIGH, LOW);
+  bladeExtended = true;
+}
+
+void retractBlade() {
+  Serial.println("BLADE_RETRACTING");
+  if (BLADE_REVERSE_TO_RETRACT) {
+    driveBlade(LOW, HIGH);
+  } else {
+    driveBlade(HIGH, LOW);
+  }
+  bladeExtended = false;
+}
+
 void enableDrivers() {
   digitalWrite(ENA_PIN, OUTPUTS_ENABLED);
   delay(2);
@@ -504,7 +575,9 @@ void disableDrivers() {
 
 void feedbackFault(const char *message) {
   disableDrivers();
+  if (bladeExtended) retractBlade();
   encoderFault = true;
+  productReady = false;
   Serial.print("FEEDBACK FAULT: ");
   Serial.println(message);
 }
@@ -651,6 +724,19 @@ bool executeSteps(long deltaJ1, long deltaJ2) {
     pulseSelectedAxes(stepJ1, stepJ2);
     serviceControlInputs();
     serviceEncoderStream();
+    if (productCutActive) {
+      if (productCutRequiresHold &&
+          digitalRead(START_STOP_BUTTON_PIN) == HIGH) {
+        productAbortRequested = true;
+      }
+      if (classifyHeadAdc(analogRead(HEAD_ID_PIN)) != HeadType::CUTTING) {
+        productAbortRequested = true;
+      }
+      if (productAbortRequested) {
+        Serial.println("CUT_ABORTED");
+        return false;
+      }
+    }
     if (USE_ENCODERS && (i & 255) == 255 && !checkFeedback()) return false;
   }
   return checkFeedback();
@@ -714,7 +800,10 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
       j2PositionSteps = lroundf(measuredJ2 * J2_STEPS_PER_DEG);
     }
   }
-  if (report) Serial.println("OK");
+  if (report) {
+    Serial.println("OK");
+    printOperationReport("MOVE_COMPLETE");
+  }
   return true;
 }
 
@@ -723,6 +812,56 @@ void forwardKinematics(float j1Deg, float j2Deg, float &x, float &y) {
   const float t2 = radians(j2Deg);
   y = LINK_1_MM * cosf(t1) + LINK_2_MM * cosf(t1 + t2);
   x = LINK_1_MM * sinf(t1) + LINK_2_MM * sinf(t1 + t2);
+}
+
+void printOperationReport(const char *label) {
+  const float softwareJ1 = currentJ1Deg();
+  const float softwareJ2 = currentJ2Deg();
+  float x = 0.0f;
+  float y = 0.0f;
+  forwardKinematics(softwareJ1, softwareJ2, x, y);
+  Serial.print("REPORT ");
+  Serial.print(label);
+  Serial.print(" SW_J1=");
+  Serial.print(softwareJ1, 2);
+  Serial.print(" SW_J2=");
+  Serial.print(softwareJ2, 2);
+  Serial.print(" X=");
+  Serial.print(x, 1);
+  Serial.print(" Y=");
+  Serial.print(y, 1);
+
+  if (encodersCalibrated) {
+    float encoderJ1 = 0.0f;
+    float encoderJ2 = 0.0f;
+    int16_t rawJ1 = 0;
+    int16_t rawJ2 = 0;
+    const bool anglesOk = encoderJointAngles(encoderJ1, encoderJ2);
+    const bool raw1Ok =
+        encoderMode == AxisMode::J2_ONLY || j1Encoder.rawValue(rawJ1);
+    const bool raw2Ok =
+        encoderMode == AxisMode::J1_ONLY || j2Encoder.rawValue(rawJ2);
+    if (anglesOk) {
+      Serial.print(" ENC_J1=");
+      Serial.print(encoderJ1, 2);
+      Serial.print(" ENC_J2=");
+      Serial.print(encoderJ2, 2);
+    } else {
+      Serial.print(" ENC_ANGLES=READ_ERROR");
+    }
+    if (raw1Ok && encoderMode != AxisMode::J2_ONLY) {
+      Serial.print(" RAW1=");
+      Serial.print(rawJ1);
+    }
+    if (raw2Ok && encoderMode != AxisMode::J1_ONLY) {
+      Serial.print(" RAW2=");
+      Serial.print(rawJ2);
+    }
+    if (!raw1Ok || !raw2Ok) Serial.print(" RAW=READ_ERROR");
+  } else {
+    Serial.print(" ENC=UNCALIBRATED");
+  }
+  Serial.println();
 }
 
 bool inverseKinematics(float x, float y, bool elbowDown,
@@ -742,17 +881,7 @@ bool inverseKinematics(float x, float y, bool elbowDown,
 }
 
 void printPosition() {
-  float x = 0.0f;
-  float y = 0.0f;
-  forwardKinematics(currentJ1Deg(), currentJ2Deg(), x, y);
-  Serial.print("POS x=");
-  Serial.print(x, 1);
-  Serial.print(" y=");
-  Serial.print(y, 1);
-  Serial.print(" J1=");
-  Serial.print(currentJ1Deg(), 2);
-  Serial.print(" J2=");
-  Serial.println(currentJ2Deg(), 2);
+  printOperationReport("POSITION");
 }
 
 bool moveToXY(float x, float y, bool elbowDown) {
@@ -785,12 +914,13 @@ bool cutLine(float x0, float y0, float x1, float y1, bool elbowDown) {
                   y0 + (y1 - y0) * fraction, elbowDown)) return false;
   }
   Serial.println("OK");
+  printOperationReport("CUT_LINE_COMPLETE");
   return true;
 }
 
 void stabilizeTeachPoints(float smoothingMs, float maxDeviationDeg) {
-  if (!STABILIZE_TEACH || taughtCount < 3 || smoothingMs <= 0.0f) return;
-  memcpy(teachScratch, taught, taughtCount * sizeof(TeachPoint));
+  if (taughtCount < 3 || smoothingMs <= 0.0f) return;
+  memcpy(teachScratch, rawTaught, taughtCount * sizeof(TeachPoint));
   for (int i = 0; i < taughtCount; ++i) {
     float sum1 = 0.0f;
     float sum2 = 0.0f;
@@ -813,6 +943,15 @@ void stabilizeTeachPoints(float smoothingMs, float maxDeviationDeg) {
     }
     taught[i].j1Deg = smooth1;
     taught[i].j2Deg = smooth2;
+  }
+}
+
+void prepareTaughtPath(float smoothingMs, float maxDeviationDeg) {
+  memcpy(taught, rawTaught, taughtCount * sizeof(TeachPoint));
+  stabilizeTeachPoints(smoothingMs, maxDeviationDeg);
+  if (taughtCount > 0) {
+    taught[0] = rawTaught[0];
+    taught[taughtCount - 1] = rawTaught[taughtCount - 1];
   }
 }
 
@@ -844,6 +983,7 @@ void recordTeach(float seconds, float hz, bool j1Only,
   disableDrivers();
   taughtCount = 0;
   taughtJ1Only = j1Only;
+  productHasLastCut = false;
   const unsigned long started = millis();
   const unsigned long interval = static_cast<unsigned long>(1000.0f / hz);
   for (int i = 0; i < requested; ++i) {
@@ -859,13 +999,15 @@ void recordTeach(float seconds, float hz, bool j1Only,
       taughtCount = 0;
       return;
     }
-    taught[taughtCount++] = {
+    rawTaught[taughtCount++] = {
       (millis() - started) / 1000.0f, j1, j1Only ? 180.0f : j2
     };
   }
   for (int i = 1; i < taughtCount; ++i) {
-    const float jumpJ1 = fabsf(taught[i].j1Deg - taught[i - 1].j1Deg);
-    const float jumpJ2 = fabsf(taught[i].j2Deg - taught[i - 1].j2Deg);
+    const float jumpJ1 =
+        fabsf(rawTaught[i].j1Deg - rawTaught[i - 1].j1Deg);
+    const float jumpJ2 =
+        fabsf(rawTaught[i].j2Deg - rawTaught[i - 1].j2Deg);
     if (jumpJ1 > 5.0f || (!j1Only && jumpJ2 > 5.0f)) {
       Serial.print("TEACH REJECTED: encoder jump at point ");
       Serial.print(i);
@@ -880,7 +1022,7 @@ void recordTeach(float seconds, float hz, bool j1Only,
       return;
     }
   }
-  stabilizeTeachPoints(smoothingMs, maxDeviationDeg);
+  prepareTaughtPath(smoothingMs, maxDeviationDeg);
   Serial.print("TAUGHT: ");
   Serial.print(taughtCount);
   Serial.print(" points, J1 ");
@@ -888,19 +1030,20 @@ void recordTeach(float seconds, float hz, bool j1Only,
   Serial.print(" -> ");
   Serial.print(taught[taughtCount - 1].j1Deg, 2);
   Serial.println("; type PLAY");
+  printOperationReport("TEACH_COMPLETE");
 }
 
-void replayTeach() {
+bool replayTeach(bool operateBlade = false) {
   if (!USE_ENCODERS || taughtCount == 0) {
     Serial.println("ERROR: no taught movement");
-    return;
+    return false;
   }
   armMode = taughtJ1Only ? AxisMode::J1_ONLY : AxisMode::DUAL;
   float measuredJ1 = 0.0f;
   float measuredJ2 = 0.0f;
   if (!encoderJointAngles(measuredJ1, measuredJ2)) {
     feedbackFault("AS5600 read failed before replay");
-    return;
+    return false;
   }
   j1PositionSteps = lroundf(measuredJ1 * J1_STEPS_PER_DEG);
   j2PositionSteps = lroundf(measuredJ2 * J2_STEPS_PER_DEG);
@@ -910,20 +1053,242 @@ void replayTeach() {
   Serial.print(measuredJ1, 2);
   Serial.print(" -> ");
   Serial.println(taught[0].j1Deg, 2);
-  if (!moveToAngles(taught[0].j1Deg, taught[0].j2Deg, false)) return;
+  if (!moveToAngles(taught[0].j1Deg, taught[0].j2Deg, false)) {
+    disableDrivers();
+    return false;
+  }
+  if (operateBlade) extendBlade();
   for (int i = 1; i < taughtCount; ++i) {
     if (!moveToAngles(taught[i].j1Deg, taught[i].j2Deg, false)) {
       Serial.print("PLAY STOPPED AT POINT ");
       Serial.print(i);
       Serial.print("/");
       Serial.println(taughtCount - 1);
-      return;
+      disableDrivers();
+      if (bladeExtended) retractBlade();
+      if (!operateBlade) printOperationReport("PLAY_STOPPED");
+      return false;
     }
   }
+  disableDrivers();
+  if (bladeExtended) retractBlade();
   Serial.print("PLAYED: ");
   Serial.print(taughtCount);
   Serial.println(" points");
-  printPosition();
+  if (!operateBlade) printOperationReport("PLAY_COMPLETE");
+  return true;
+}
+
+bool validateRawTeachPath(bool j1Only) {
+  for (int i = 1; i < taughtCount; ++i) {
+    const float jumpJ1 =
+        fabsf(rawTaught[i].j1Deg - rawTaught[i - 1].j1Deg);
+    const float jumpJ2 =
+        fabsf(rawTaught[i].j2Deg - rawTaught[i - 1].j2Deg);
+    if (jumpJ1 > 5.0f || (!j1Only && jumpJ2 > 5.0f)) {
+      Serial.print("TEACH_REJECTED_ENCODER_JUMP POINT=");
+      Serial.print(i);
+      Serial.print(" J1=");
+      Serial.print(jumpJ1, 2);
+      Serial.print(" J2=");
+      Serial.println(jumpJ2, 2);
+      taughtCount = 0;
+      return false;
+    }
+  }
+  return true;
+}
+
+bool sampleProductTeach(unsigned long now) {
+  if (taughtCount >= MAX_TEACH_POINTS) {
+    Serial.println("TEACHING_STOPPED_MEMORY_LIMIT");
+    return false;
+  }
+  float j1 = 0.0f;
+  float j2 = 0.0f;
+  if (!encoderJointAngles(j1, j2)) {
+    feedbackFault("AS5600 read failed while teaching");
+    taughtCount = 0;
+    return false;
+  }
+  rawTaught[taughtCount++] = {
+      (now - productTeachStartedMs) / 1000.0f, j1, j2};
+  return true;
+}
+
+void startProductTeach(unsigned long now) {
+  if (!productReady || !encodersCalibrated ||
+      encoderMode != AxisMode::DUAL) {
+    Serial.println("ERROR_PRODUCT_NOT_READY_USE_ARM_FOLDED");
+    return;
+  }
+  if (!headTypeInitialized || stableHeadType != HeadType::TRACING) {
+    Serial.println("ERROR_TRACER_HEAD_REQUIRED");
+    return;
+  }
+
+  disableDrivers();
+  taughtJ1Only = false;
+  taughtCount = 0;
+  productHasLastCut = false;
+  productTeachStartedMs = now;
+  nextProductTeachSampleMs = now;
+  productState = ProductState::TEACHING;
+  if (!sampleProductTeach(now)) {
+    productState = ProductState::IDLE;
+    return;
+  }
+  nextProductTeachSampleMs =
+      now + static_cast<unsigned long>(1000.0f / PRODUCT_TEACH_HZ);
+  Serial.println("TRACING_STARTED_HOLD_BUTTON");
+}
+
+void stopProductTeach(unsigned long now) {
+  if (productState != ProductState::TEACHING) return;
+  if (taughtCount == 0 ||
+      rawTaught[taughtCount - 1].seconds <
+          (now - productTeachStartedMs) / 1000.0f) {
+    sampleProductTeach(now);
+  }
+  productState = ProductState::IDLE;
+  if (taughtCount < 2) {
+    taughtCount = 0;
+    Serial.println("ERROR_TRACED_PATH_TOO_SHORT");
+    printOperationReport("TRACING_STOPPED_ERROR");
+    return;
+  }
+  if (!validateRawTeachPath(false)) {
+    printOperationReport("TRACING_REJECTED");
+    return;
+  }
+  prepareTaughtPath(0.0f, 0.0f);
+
+  float j1 = 0.0f;
+  float j2 = 0.0f;
+  if (!encoderJointAngles(j1, j2)) {
+    feedbackFault("AS5600 read failed after teaching");
+    taughtCount = 0;
+    return;
+  }
+  j1PositionSteps = lroundf(j1 * J1_STEPS_PER_DEG);
+  j2PositionSteps = lroundf(j2 * J2_STEPS_PER_DEG);
+  Serial.print("TRACING_STOPPED POINTS=");
+  Serial.println(taughtCount);
+  printOperationReport("TRACING_COMPLETE");
+}
+
+void runProductCut(bool repeat, bool requireStartHeld) {
+  if (!productReady || !encodersCalibrated ||
+      encoderMode != AxisMode::DUAL) {
+    Serial.println("ERROR_PRODUCT_NOT_READY_USE_ARM_FOLDED");
+    return;
+  }
+  if (!headTypeInitialized || stableHeadType != HeadType::CUTTING) {
+    Serial.println("ERROR_CUTTER_HEAD_REQUIRED");
+    return;
+  }
+  if (taughtCount < 2) {
+    Serial.println("ERROR_NO_TRACED_PATH");
+    return;
+  }
+  if (repeat && !productHasLastCut) {
+    Serial.println("ERROR_NO_COMPLETED_CUT_TO_REPEAT");
+    return;
+  }
+
+  prepareTaughtPath(
+      stabilizationEnabled ? PRODUCT_SMOOTHING_MS : 0.0f,
+      stabilizationEnabled ? PRODUCT_MAX_DEVIATION_DEG : 0.0f);
+  taughtJ1Only = false;
+  productState = ProductState::CUTTING;
+  productCutActive = true;
+  productAbortRequested = false;
+  productCutRequiresHold = requireStartHeld;
+  Serial.print(repeat ? "REPEATING_LAST_CUT" : "CUTTING_STARTED");
+  Serial.println(
+      stabilizationEnabled ? "_WITH_STABILIZATION" : "");
+  const bool completed = replayTeach(true);
+  productCutActive = false;
+  productCutRequiresHold = false;
+  productState = ProductState::IDLE;
+  disableDrivers();
+  if (bladeExtended) retractBlade();
+  if (completed) {
+    productHasLastCut = true;
+    Serial.println(repeat ? "REPEAT_COMPLETE" : "CUT_COMPLETE");
+  } else {
+    Serial.println(repeat ? "REPEAT_STOPPED" : "CUT_STOPPED");
+  }
+  printOperationReport(
+      completed
+          ? (repeat ? "REPEAT_COMPLETE" : "CUT_COMPLETE")
+          : (repeat ? "REPEAT_STOPPED" : "CUT_STOPPED"));
+}
+
+void handleProductButtonChange(const ButtonInput &button) {
+  const bool pressed = button.stableState == LOW;
+  const unsigned long now = millis();
+
+  if (button.number == 1) {
+    if (pressed) {
+      if (productState == ProductState::IDLE) {
+        if (headTypeInitialized && stableHeadType == HeadType::TRACING) {
+          startProductTeach(now);
+        } else if (headTypeInitialized &&
+                   stableHeadType == HeadType::CUTTING) {
+          runProductCut(false, true);
+        } else {
+          Serial.println("ERROR_RECOGNIZED_HEAD_REQUIRED");
+        }
+      }
+    } else if (productState == ProductState::TEACHING) {
+      stopProductTeach(now);
+    } else if (productState == ProductState::CUTTING &&
+               productCutRequiresHold) {
+      productAbortRequested = true;
+      Serial.println("CUT_ABORT_REQUESTED_BUTTON_RELEASED");
+    }
+    return;
+  }
+
+  if (!pressed) return;
+  if (button.number == 2) {
+    if (productState != ProductState::IDLE) {
+      Serial.println("STABILIZATION_CHANGE_IGNORED_ACTIVE_OPERATION");
+      return;
+    }
+    stabilizationEnabled = !stabilizationEnabled;
+    Serial.println(
+        stabilizationEnabled ? "STABILIZATION_ON" : "STABILIZATION_OFF");
+  } else if (button.number == 3) {
+    if (productState != ProductState::IDLE) {
+      Serial.println("REPEAT_IGNORED_ACTIVE_OPERATION");
+      return;
+    }
+    runProductCut(true, false);
+  }
+}
+
+void serviceProductWorkflow() {
+  if (controlTestEnabled || stateTestEnabled) return;
+  if (productState != ProductState::TEACHING) return;
+
+  const unsigned long now = millis();
+  if (now - productTeachStartedMs >=
+      static_cast<unsigned long>(PRODUCT_TEACH_MAX_SECONDS * 1000.0f)) {
+    stopProductTeach(now);
+    Serial.println("TRACING_STOPPED_MAXIMUM_DURATION");
+    return;
+  }
+  if (static_cast<long>(now - nextProductTeachSampleMs) >= 0) {
+    if (!sampleProductTeach(now)) {
+      productState = ProductState::IDLE;
+      printOperationReport("TRACING_STOPPED_ERROR");
+      return;
+    }
+    nextProductTeachSampleMs +=
+        static_cast<unsigned long>(1000.0f / PRODUCT_TEACH_HZ);
+  }
 }
 
 bool parseElbow(const char *text) {
@@ -931,6 +1296,11 @@ bool parseElbow(const char *text) {
 }
 
 void printHelp() {
+  Serial.println("Physical product controls after ARM FOLDED:");
+  Serial.println("  Hold Start/Stop + tracer: record; release: stop");
+  Serial.println("  Hold Start/Stop + cutter: cut; release: abort");
+  Serial.println("  Stabilization: toggle while idle");
+  Serial.println("  Repeat: repeat the last completed cut");
   Serial.println("Commands:");
   Serial.println("  ARM FOLDED | ARM J1 | ARM J2 | DISARM");
   Serial.println("  TEST J1 <steps> | TEST J2 <steps>");
@@ -952,6 +1322,8 @@ void armAtFoldedPose(AxisMode mode) {
   armMode = mode;
   encodersCalibrated = false;
   encoderMode = mode;
+  productReady = false;
+  productState = ProductState::IDLE;
   if (USE_ENCODERS) {
     const bool j1Ok =
         mode == AxisMode::J2_ONLY || j1Encoder.calibrate();
@@ -968,13 +1340,16 @@ void armAtFoldedPose(AxisMode mode) {
   }
   enableDrivers();
   armed = true;
+  productReady = mode == AxisMode::DUAL;
   if (mode == AxisMode::J1_ONLY) {
     Serial.println("ARMED J1 TEST: only J1 motion is allowed");
   } else if (mode == AxisMode::J2_ONLY) {
     Serial.println("ARMED J2 TEST: J2 homed at 180; only J2 motion is allowed");
   } else {
-    Serial.println("ARMED at J1=0, J2=180");
+    Serial.println(
+        "ARMED at J1=0, J2=180; physical product buttons enabled");
   }
+  printOperationReport("ARM_COMPLETE");
 }
 
 void handleCommand(String command) {
@@ -1004,16 +1379,24 @@ void handleCommand(String command) {
   if (command == "DISARM") {
     disableDrivers();
     armMode = AxisMode::DUAL;
+    productReady = false;
+    productState = ProductState::IDLE;
+    if (bladeExtended) retractBlade();
     Serial.println("DISARMED");
+    printOperationReport("DISARMED");
     return;
   }
   if (command == "POS") return printPosition();
   if (command == "CLEAR") {
     taughtCount = 0;
+    productHasLastCut = false;
     Serial.println("TAUGHT MOVEMENT CLEARED");
     return;
   }
-  if (command == "PLAY") return replayTeach();
+  if (command == "PLAY") {
+    replayTeach();
+    return;
+  }
   if (command == "FEEDBACK ON") {
     encoderFeedbackEnabled = true;
     Serial.println("FEEDBACK ON: correction and position faults enabled");
@@ -1132,10 +1515,12 @@ void handleCommand(String command) {
                armMode != AxisMode::J2_ONLY) {
       executeSteps(rawSteps, 0);
       Serial.println("OK");
+      printOperationReport("TEST_J1_COMPLETE");
     } else if (strcmp(axis, "J2") == 0 &&
                armMode != AxisMode::J1_ONLY) {
       executeSteps(0, rawSteps);
       Serial.println("OK");
+      printOperationReport("TEST_J2_COMPLETE");
     } else {
       Serial.println("ERROR: invalid or blocked test axis");
     }
@@ -1198,6 +1583,7 @@ void setup() {
   Serial.println();
   Serial.println("SwivelCut Arduino controller ready");
   Serial.println("Fold the arm, then type ARM FOLDED");
+  Serial.println("Product buttons become active after ARM FOLDED.");
   Serial.println("Type CONTROL TEST ON to test buttons and head ID.");
   printHelp();
 }
@@ -1215,5 +1601,6 @@ void loop() {
     }
   }
   serviceControlInputs();
+  serviceProductWorkflow();
   serviceEncoderStream();
 }
