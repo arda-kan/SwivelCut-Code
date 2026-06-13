@@ -61,10 +61,10 @@ constexpr unsigned long DIR_SETUP_US = 100;
 // Encoder branches set this to true. The main branch needs no AS5600 modules.
 constexpr bool USE_ENCODERS = true;
 constexpr uint8_t AS5600_ADDRESS = 0x36;
-constexpr int J1_SDA_PIN = 16;
-constexpr int J1_SCL_PIN = 17;
-constexpr int J2_SDA_PIN = 18;
-constexpr int J2_SCL_PIN = 19;
+constexpr int J1_SDA_PIN = 18;
+constexpr int J1_SCL_PIN = 19;
+constexpr int J2_SDA_PIN = 16;
+constexpr int J2_SCL_PIN = 17;
 constexpr int ENCODER_J1_SIGN = -1;
 constexpr int ENCODER_J2_SIGN = 1;
 constexpr float FEEDBACK_TOLERANCE_DEG = 0.25f;
