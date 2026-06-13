@@ -61,6 +61,9 @@ constexpr unsigned long DIR_SETUP_US = 100;
 // Encoder branches set this to true. The main branch needs no AS5600 modules.
 constexpr bool USE_ENCODERS = true;
 constexpr uint8_t AS5600_ADDRESS = 0x36;
+constexpr uint32_t AS5600_I2C_HZ = 100000;
+constexpr int AS5600_READ_ATTEMPTS = 3;
+constexpr unsigned long AS5600_RETRY_DELAY_US = 250;
 constexpr int J1_SDA_PIN = 18;
 constexpr int J1_SCL_PIN = 19;
 constexpr int J2_SDA_PIN = 16;
@@ -138,7 +141,7 @@ class AS5600Tracker {
         positionCounts_(0) {}
 
   bool begin(int sda, int scl) {
-    wire_.begin(sda, scl, 400000);
+    wire_.begin(sda, scl, AS5600_I2C_HZ);
     return probe();
   }
 
@@ -226,18 +229,20 @@ class AS5600Tracker {
   }
 
   bool readRegister(uint8_t reg, uint8_t *data, size_t length) {
-    wire_.beginTransmission(AS5600_ADDRESS);
-    wire_.write(reg);
-    if (wire_.endTransmission(false) != 0) {
-      return false;
+    for (int attempt = 0; attempt < AS5600_READ_ATTEMPTS; ++attempt) {
+      wire_.beginTransmission(AS5600_ADDRESS);
+      wire_.write(reg);
+      if (wire_.endTransmission(false) == 0 &&
+          wire_.requestFrom(AS5600_ADDRESS, length) == length) {
+        for (size_t i = 0; i < length; ++i) {
+          data[i] = wire_.read();
+        }
+        return true;
+      }
+      while (wire_.available()) wire_.read();
+      delayMicroseconds(AS5600_RETRY_DELAY_US);
     }
-    if (wire_.requestFrom(AS5600_ADDRESS, length) != length) {
-      return false;
-    }
-    for (size_t i = 0; i < length; ++i) {
-      data[i] = wire_.read();
-    }
-    return true;
+    return false;
   }
 
   TwoWire &wire_;

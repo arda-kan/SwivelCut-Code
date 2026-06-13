@@ -45,7 +45,8 @@ Coordinates use positive X to the physical right and positive Y forward.
 | Head-ID ADC | 34 |
 
 Each AS5600 uses address `0x36` on its own ESP32 I2C controller. Power both
-encoder modules from 3.3 V.
+encoder modules from 3.3 V. The buses run at 100 kHz and retry transient reads
+three times before declaring a feedback fault.
 
 Buttons are normally open to GND and use `INPUT_PULLUP`. Pressed is LOW.
 
