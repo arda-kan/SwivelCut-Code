@@ -956,40 +956,62 @@ void stabilizeTeachPointsXY(float smoothingMs, float maxDeviationDeg) {
                       teachScratch[i].j1Deg, teachScratch[i].j2Deg);
   }
 
-  const float maxDeviationMm =
-      radians(maxDeviationDeg) * (LINK_1_MM + LINK_2_MM);
   for (int i = 0; i < taughtCount; ++i) {
-    float sumX = 0.0f;
-    float sumY = 0.0f;
-    int count = 0;
-    for (int j = 0; j < taughtCount; ++j) {
-      if (fabsf((teachScratch[j].seconds - teachScratch[i].seconds) *
-                1000.0f) <= smoothingMs) {
-        sumX += teachScratch[j].j1Deg;
-        sumY += teachScratch[j].j2Deg;
-        ++count;
+    const float rawX = teachScratch[i].j1Deg;
+    const float rawY = teachScratch[i].j2Deg;
+    const float reachMm = max(hypotf(rawX, rawY), 20.0f);
+    const float maxDeviationMm = radians(maxDeviationDeg) * reachMm;
+    const float windowsMs[] = {
+        smoothingMs, smoothingMs * 0.5f, smoothingMs * 0.25f, 0.0f};
+    const bool elbowDown = rawTaught[i].j2Deg - 180.0f < 0.0f;
+    bool solved = false;
+
+    for (size_t attempt = 0;
+         attempt < sizeof(windowsMs) / sizeof(windowsMs[0]); ++attempt) {
+      const float windowMs = windowsMs[attempt];
+      float smoothX = rawX;
+      float smoothY = rawY;
+      if (windowMs > 0.0f) {
+        float sumX = 0.0f;
+        float sumY = 0.0f;
+        int count = 0;
+        for (int j = 0; j < taughtCount; ++j) {
+          if (fabsf((teachScratch[j].seconds - teachScratch[i].seconds) *
+                    1000.0f) <= windowMs) {
+            sumX += teachScratch[j].j1Deg;
+            sumY += teachScratch[j].j2Deg;
+            ++count;
+          }
+        }
+        smoothX = sumX / count;
+        smoothY = sumY / count;
+      }
+
+      if (maxDeviationDeg > 0.0f) {
+        smoothX = constrain(smoothX, rawX - maxDeviationMm,
+                            rawX + maxDeviationMm);
+        smoothY = constrain(smoothY, rawY - maxDeviationMm,
+                            rawY + maxDeviationMm);
+      }
+
+      float smoothJ1 = 0.0f;
+      float smoothJ2 = 0.0f;
+      if (inverseKinematics(smoothX, smoothY, elbowDown,
+                            smoothJ1, smoothJ2)) {
+        taught[i].j1Deg = smoothJ1;
+        taught[i].j2Deg = smoothJ2;
+        solved = true;
+        if (attempt > 0) {
+          Serial.print("XY_SMOOTH_REDUCED point=");
+          Serial.print(i);
+          Serial.print(" window_ms=");
+          Serial.println(windowMs);
+        }
+        break;
       }
     }
 
-    float smoothX = sumX / count;
-    float smoothY = sumY / count;
-    if (maxDeviationDeg > 0.0f) {
-      smoothX = constrain(smoothX,
-                          teachScratch[i].j1Deg - maxDeviationMm,
-                          teachScratch[i].j1Deg + maxDeviationMm);
-      smoothY = constrain(smoothY,
-                          teachScratch[i].j2Deg - maxDeviationMm,
-                          teachScratch[i].j2Deg + maxDeviationMm);
-    }
-
-    float smoothJ1 = 0.0f;
-    float smoothJ2 = 0.0f;
-    const bool elbowDown = rawTaught[i].j2Deg - 180.0f < 0.0f;
-    if (inverseKinematics(smoothX, smoothY, elbowDown,
-                          smoothJ1, smoothJ2)) {
-      taught[i].j1Deg = smoothJ1;
-      taught[i].j2Deg = smoothJ2;
-    } else {
+    if (!solved) {
       taught[i].j1Deg = rawTaught[i].j1Deg;
       taught[i].j2Deg = rawTaught[i].j2Deg;
       Serial.print("XY_SMOOTH_FALLBACK point=");
