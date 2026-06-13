@@ -227,7 +227,6 @@ AS5600Tracker j1Encoder(j1Wire, ENCODER_J1_SIGN);
 AS5600Tracker j2Encoder(j2Wire, ENCODER_J2_SIGN);
 TeachPoint taught[MAX_TEACH_POINTS];
 TeachPoint rawTaught[MAX_TEACH_POINTS];
-TeachPoint teachScratch[MAX_TEACH_POINTS];
 
 long j1PositionSteps = 0;
 long j2PositionSteps = lroundf(180.0f * J2_STEPS_PER_DEG);
@@ -922,26 +921,25 @@ bool cutLine(float x0, float y0, float x1, float y1, bool elbowDown) {
 
 void stabilizeTeachPoints(float smoothingMs, float maxDeviationDeg) {
   if (taughtCount < 3 || smoothingMs <= 0.0f) return;
-  memcpy(teachScratch, rawTaught, taughtCount * sizeof(TeachPoint));
   for (int i = 0; i < taughtCount; ++i) {
     float sum1 = 0.0f;
     float sum2 = 0.0f;
     int count = 0;
     for (int j = 0; j < taughtCount; ++j) {
-      if (fabsf((teachScratch[j].seconds - teachScratch[i].seconds) * 1000.0f) <=
+      if (fabsf((rawTaught[j].seconds - rawTaught[i].seconds) * 1000.0f) <=
           smoothingMs) {
-        sum1 += teachScratch[j].j1Deg;
-        sum2 += teachScratch[j].j2Deg;
+        sum1 += rawTaught[j].j1Deg;
+        sum2 += rawTaught[j].j2Deg;
         ++count;
       }
     }
     float smooth1 = sum1 / count;
     float smooth2 = sum2 / count;
     if (maxDeviationDeg > 0.0f) {
-      smooth1 = constrain(smooth1, teachScratch[i].j1Deg - maxDeviationDeg,
-                          teachScratch[i].j1Deg + maxDeviationDeg);
-      smooth2 = constrain(smooth2, teachScratch[i].j2Deg - maxDeviationDeg,
-                          teachScratch[i].j2Deg + maxDeviationDeg);
+      smooth1 = constrain(smooth1, rawTaught[i].j1Deg - maxDeviationDeg,
+                          rawTaught[i].j1Deg + maxDeviationDeg);
+      smooth2 = constrain(smooth2, rawTaught[i].j2Deg - maxDeviationDeg,
+                          rawTaught[i].j2Deg + maxDeviationDeg);
     }
     taught[i].j1Deg = smooth1;
     taught[i].j2Deg = smooth2;
@@ -951,15 +949,22 @@ void stabilizeTeachPoints(float smoothingMs, float maxDeviationDeg) {
 void stabilizeTeachPointsXY(float smoothingMs, float maxDeviationDeg) {
   if (taughtCount < 3 || smoothingMs <= 0.0f) return;
 
+  float *xyScratch = static_cast<float *>(
+      malloc(taughtCount * 2 * sizeof(float)));
+  if (xyScratch == nullptr) {
+    Serial.println("XY_SMOOTH_SKIPPED insufficient memory");
+    return;
+  }
+  float *scratchX = xyScratch;
+  float *scratchY = xyScratch + taughtCount;
   for (int i = 0; i < taughtCount; ++i) {
-    teachScratch[i].seconds = rawTaught[i].seconds;
     forwardKinematics(rawTaught[i].j1Deg, rawTaught[i].j2Deg,
-                      teachScratch[i].j1Deg, teachScratch[i].j2Deg);
+                      scratchX[i], scratchY[i]);
   }
 
   for (int i = 0; i < taughtCount; ++i) {
-    const float rawX = teachScratch[i].j1Deg;
-    const float rawY = teachScratch[i].j2Deg;
+    const float rawX = scratchX[i];
+    const float rawY = scratchY[i];
     const float reachMm = max(hypotf(rawX, rawY), 20.0f);
     const float maxDeviationMm = radians(maxDeviationDeg) * reachMm;
     const float windowsMs[] = {
@@ -977,10 +982,10 @@ void stabilizeTeachPointsXY(float smoothingMs, float maxDeviationDeg) {
         float sumY = 0.0f;
         int count = 0;
         for (int j = 0; j < taughtCount; ++j) {
-          if (fabsf((teachScratch[j].seconds - teachScratch[i].seconds) *
+          if (fabsf((rawTaught[j].seconds - rawTaught[i].seconds) *
                     1000.0f) <= windowMs) {
-            sumX += teachScratch[j].j1Deg;
-            sumY += teachScratch[j].j2Deg;
+            sumX += scratchX[j];
+            sumY += scratchY[j];
             ++count;
           }
         }
@@ -1019,6 +1024,7 @@ void stabilizeTeachPointsXY(float smoothingMs, float maxDeviationDeg) {
       Serial.println(i);
     }
   }
+  free(xyScratch);
 }
 
 void prepareTaughtPath(float smoothingMs, float maxDeviationDeg) {
