@@ -108,6 +108,8 @@ PLAY
 CLEAR
 LOAD POINTS <N>
 CUT LOADED
+BLADE RETRACTED
+BLADE DOWN
 CONTROL TEST ON
 CONTROL TEST OFF
 STATE TEST ON
@@ -128,6 +130,12 @@ After `LOAD POINTS <N>`, send exactly N lines containing:
 
 Use `swivelcut_visualizer.html` to generate this package from an SVG.
 
+The blade actuator exposes only two serial commands: `BLADE RETRACTED` and
+`BLADE DOWN`. Both commands drive the actuator for the timed duration configured
+near the top of the firmware. Cut operations force the blade retracted before
+moving to the start point, drive it down for the cutting pass, and retract it
+again on completion or stop.
+
 ## Replay Mode
 
 `CONTINUOUS_TRAJECTORY_REPLAY` near the top of the firmware selects the replay
@@ -137,6 +145,19 @@ at the final point. Set it to `false` to restore point-by-point motion and
 feedback settling. The continuous executor automatically slows the full
 trajectory when a recorded segment requests more steps than the configured
 pulse timing permits.
+
+## Stepper Timing
+
+The firmware uses two independent ESP32 hardware timers, one for each TB6600
+STEP pin. Timer ISRs emit active/idle pulse phases and atomically update the
+software joint positions as pulses are generated. J1 and J2 therefore run at
+different frequencies within the same trajectory segment while controls,
+encoder streaming, feedback checks, and cut aborts continue to be serviced.
+
+The implementation targets the Arduino-ESP32 3.x `timerBegin(frequency)` API.
+`STEPPER_TIMER_HZ`, `STEPPER_MIN_HALF_PERIOD_US`, and
+`DEFAULT_STEP_RATE_HZ` near the top of the sketch control timer resolution,
+maximum pulse rate, and ordinary point-move speed.
 
 ## Stabilization
 
@@ -154,5 +175,6 @@ board. The current configuration compiles without PSRAM and uses approximately
 ## Safety
 
 Test with the blade removed first. The blade actuator is timed open-loop and
-does not have position feedback. Limit switches or equivalent blade-position
-feedback are recommended before production use.
+does not have position feedback. Tune `BLADE_DOWN_SECONDS` and
+`BLADE_RETRACT_SECONDS` on the machine before cutting material. Limit switches
+or equivalent blade-position feedback are recommended before production use.

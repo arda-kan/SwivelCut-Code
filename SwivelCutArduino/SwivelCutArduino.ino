@@ -1,10 +1,11 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <driver/gpio.h>
 #include <math.h>
 
 // SwivelCut firmware for an ESP32 and two TB6600 stepper drivers.
-// The pulse waveform follows the supplied DFRobot example:
-// STEP HIGH for 1500 us, then STEP LOW for 1500 us.
+// STEP pulses are generated independently for each axis by ESP32 hardware
+// timers, leaving the main CPU free to service controls and encoder feedback.
 
 constexpr int J1_PUL_PIN = 25;
 constexpr int J1_DIR_PIN = 26;
@@ -13,7 +14,8 @@ constexpr int J2_DIR_PIN = 33;
 constexpr int ENA_PIN = 27;
 constexpr int BLADE_IN1_PIN = 13;
 constexpr int BLADE_IN2_PIN = 14;
-constexpr unsigned long BLADE_DRIVE_MS = 500;
+constexpr float BLADE_DOWN_SECONDS = 0.75f;
+constexpr float BLADE_RETRACT_SECONDS = 0.75f;
 constexpr bool BLADE_REVERSE_TO_RETRACT = true;
 
 constexpr int START_STOP_BUTTON_PIN = 5;
@@ -61,10 +63,12 @@ constexpr uint8_t STEP_ACTIVE = HIGH;
 constexpr uint8_t STEP_IDLE = LOW;
 constexpr uint8_t OUTPUTS_ENABLED = HIGH;
 constexpr uint8_t OUTPUTS_DISABLED = LOW;
-constexpr unsigned long STEP_HALF_PERIOD_US = 1500;
 constexpr unsigned long DIR_SETUP_US = 100;
-constexpr unsigned long CONTINUOUS_MIN_STEP_INTERVAL_US =
-    STEP_HALF_PERIOD_US * 2 + DIR_SETUP_US;
+constexpr uint32_t STEPPER_TIMER_HZ = 1000000;
+constexpr unsigned long STEPPER_MIN_HALF_PERIOD_US = 5;
+constexpr unsigned long STEPPER_MIN_STEP_PERIOD_US =
+    STEPPER_MIN_HALF_PERIOD_US * 2;
+constexpr float DEFAULT_STEP_RATE_HZ = 333.333f;
 
 // Encoder branches set this to true. The main branch needs no AS5600 modules.
 constexpr bool USE_ENCODERS = true;
@@ -140,6 +144,11 @@ enum class ProductState {
   IDLE,
   TEACHING,
   CUTTING,
+};
+
+enum class BladePosition {
+  RETRACTED,
+  DOWN,
 };
 
 class AS5600Tracker {
@@ -267,8 +276,8 @@ AS5600Tracker j2Encoder(j2Wire, ENCODER_J2_SIGN);
 TeachPoint taught[MAX_TEACH_POINTS];
 TeachPoint rawTaught[MAX_TEACH_POINTS];
 
-long j1PositionSteps = 0;
-long j2PositionSteps = lroundf(180.0f * J2_STEPS_PER_DEG);
+volatile long j1PositionSteps = 0;
+volatile long j2PositionSteps = lroundf(180.0f * J2_STEPS_PER_DEG);
 int taughtCount = 0;
 bool taughtJ1Only = false;
 bool armed = false;
@@ -308,7 +317,7 @@ HeadType testActiveHead = HeadType::UNKNOWN;
 ProductState productState = ProductState::IDLE;
 bool productReady = false;
 bool stabilizationEnabled = false;
-bool bladeExtended = false;
+BladePosition bladePosition = BladePosition::RETRACTED;
 bool productCutActive = false;
 bool productAbortRequested = false;
 bool productHasLastCut = false;
@@ -316,10 +325,45 @@ bool motorsMoving = false;
 unsigned long productTeachStartedMs = 0;
 unsigned long nextProductTeachSampleMs = 0;
 
-float currentJ1Deg() { return j1PositionSteps / J1_STEPS_PER_DEG; }
-float currentJ2Deg() { return j2PositionSteps / J2_STEPS_PER_DEG; }
+struct StepAxisRuntime {
+  int stepPin;
+  hw_timer_t *timer;
+  volatile long remainingSteps;
+  volatile long emittedSteps;
+  volatile int direction;
+  volatile bool active;
+  volatile bool pulseActive;
+  bool timerRunning;
+  volatile long *positionSteps;
+};
+
+StepAxisRuntime j1StepAxis = {
+    J1_PUL_PIN, nullptr, 0, 0, 1, false, false, false, &j1PositionSteps};
+StepAxisRuntime j2StepAxis = {
+    J2_PUL_PIN, nullptr, 0, 0, 1, false, false, false, &j2PositionSteps};
+bool stepperTimersReady = false;
+bool motionSegmentActive = false;
+unsigned long motionSegmentStartedUs = 0;
+unsigned long motionSegmentDurationUs = 0;
+
+long atomicReadSteps(volatile long &steps) {
+  return __atomic_load_n(&steps, __ATOMIC_ACQUIRE);
+}
+
+void atomicWriteSteps(volatile long &steps, long value) {
+  __atomic_store_n(&steps, value, __ATOMIC_RELEASE);
+}
+
+float currentJ1Deg() {
+  return atomicReadSteps(j1PositionSteps) / J1_STEPS_PER_DEG;
+}
+
+float currentJ2Deg() {
+  return atomicReadSteps(j2PositionSteps) / J2_STEPS_PER_DEG;
+}
 
 void disableDrivers();
+void stopMotionSegment();
 void serviceProductWorkflow();
 void handleProductButtonChange(const ButtonInput &button);
 void printOperationReport(const char *label);
@@ -589,27 +633,37 @@ void stopBlade() {
   digitalWrite(BLADE_IN2_PIN, LOW);
 }
 
-void driveBlade(uint8_t in1, uint8_t in2) {
+bool bladeIsDown() {
+  return bladePosition == BladePosition::DOWN;
+}
+
+unsigned long bladeDriveMs(float seconds) {
+  return static_cast<unsigned long>(seconds * 1000.0f);
+}
+
+void driveBlade(uint8_t in1, uint8_t in2, float seconds) {
   digitalWrite(BLADE_IN1_PIN, in1);
   digitalWrite(BLADE_IN2_PIN, in2);
-  delay(BLADE_DRIVE_MS);
+  delay(bladeDriveMs(seconds));
   stopBlade();
 }
 
-void extendBlade() {
-  Serial.println("BLADE_EXTENDING");
-  driveBlade(HIGH, LOW);
-  bladeExtended = true;
+void bladeDown(bool force = false) {
+  if (!force && bladePosition == BladePosition::DOWN) return;
+  Serial.println("BLADE_DOWN");
+  driveBlade(HIGH, LOW, BLADE_DOWN_SECONDS);
+  bladePosition = BladePosition::DOWN;
 }
 
-void retractBlade() {
-  Serial.println("BLADE_RETRACTING");
+void bladeRetracted(bool force = false) {
+  if (!force && bladePosition == BladePosition::RETRACTED) return;
+  Serial.println("BLADE_RETRACTED");
   if (BLADE_REVERSE_TO_RETRACT) {
-    driveBlade(LOW, HIGH);
+    driveBlade(LOW, HIGH, BLADE_RETRACT_SECONDS);
   } else {
-    driveBlade(HIGH, LOW);
+    driveBlade(HIGH, LOW, BLADE_RETRACT_SECONDS);
   }
-  bladeExtended = false;
+  bladePosition = BladePosition::RETRACTED;
 }
 
 void enableDrivers() {
@@ -618,13 +672,14 @@ void enableDrivers() {
 }
 
 void disableDrivers() {
+  if (motionSegmentActive) stopMotionSegment();
   digitalWrite(ENA_PIN, OUTPUTS_DISABLED);
   armed = false;
 }
 
 void feedbackFault(const char *message) {
   disableDrivers();
-  if (bladeExtended) retractBlade();
+  if (bladeIsDown()) bladeRetracted();
   encoderFault = true;
   productReady = false;
   Serial.print("FEEDBACK FAULT: ");
@@ -639,13 +694,149 @@ void setDirection(int pin, long delta, bool invert) {
   digitalWrite(pin, forward ? HIGH : LOW);
 }
 
-void pulseSelectedAxes(bool stepJ1, bool stepJ2) {
-  if (stepJ1) digitalWrite(J1_PUL_PIN, STEP_ACTIVE);
-  if (stepJ2) digitalWrite(J2_PUL_PIN, STEP_ACTIVE);
-  delayMicroseconds(STEP_HALF_PERIOD_US);
-  if (stepJ1) digitalWrite(J1_PUL_PIN, STEP_IDLE);
-  if (stepJ2) digitalWrite(J2_PUL_PIN, STEP_IDLE);
-  delayMicroseconds(STEP_HALF_PERIOD_US);
+// Arduino-ESP32 3.x timerBegin(frequency) configures a general-purpose timer
+// at the requested tick rate. Each axis uses a separate 1 MHz timer, so one
+// alarm tick is 1 us. The ISR alternates STEP active/idle phases; changing
+// STEPPER_TIMER_HZ or STEPPER_MIN_HALF_PERIOD_US retunes pulse resolution and
+// the maximum allowed step rate without changing the trajectory code.
+void ARDUINO_ISR_ATTR stepAxisTimerIsr(void *argument) {
+  StepAxisRuntime *axis = static_cast<StepAxisRuntime *>(argument);
+  if (!__atomic_load_n(&axis->active, __ATOMIC_ACQUIRE)) {
+    gpio_set_level(static_cast<gpio_num_t>(axis->stepPin), STEP_IDLE);
+    return;
+  }
+
+  if (!__atomic_load_n(&axis->pulseActive, __ATOMIC_RELAXED)) {
+    gpio_set_level(static_cast<gpio_num_t>(axis->stepPin), STEP_ACTIVE);
+    __atomic_store_n(&axis->pulseActive, true, __ATOMIC_RELEASE);
+    __atomic_add_fetch(
+        axis->positionSteps,
+        __atomic_load_n(&axis->direction, __ATOMIC_RELAXED),
+        __ATOMIC_RELAXED);
+    __atomic_add_fetch(&axis->emittedSteps, 1L, __ATOMIC_RELAXED);
+    __atomic_sub_fetch(&axis->remainingSteps, 1L, __ATOMIC_RELAXED);
+  } else {
+    gpio_set_level(static_cast<gpio_num_t>(axis->stepPin), STEP_IDLE);
+    __atomic_store_n(&axis->pulseActive, false, __ATOMIC_RELEASE);
+    if (__atomic_load_n(&axis->remainingSteps, __ATOMIC_ACQUIRE) <= 0) {
+      __atomic_store_n(&axis->active, false, __ATOMIC_RELEASE);
+    }
+  }
+}
+
+bool initializeStepperTimers() {
+  j1StepAxis.timer = timerBegin(STEPPER_TIMER_HZ);
+  j2StepAxis.timer = timerBegin(STEPPER_TIMER_HZ);
+  if (j1StepAxis.timer == nullptr || j2StepAxis.timer == nullptr) {
+    Serial.println("ERROR: failed to allocate stepper hardware timers");
+    return false;
+  }
+  timerAttachInterruptArg(
+      j1StepAxis.timer, stepAxisTimerIsr, &j1StepAxis);
+  timerAttachInterruptArg(
+      j2StepAxis.timer, stepAxisTimerIsr, &j2StepAxis);
+  return true;
+}
+
+void stopStepAxis(StepAxisRuntime &axis) {
+  __atomic_store_n(&axis.active, false, __ATOMIC_RELEASE);
+  if (axis.timerRunning) {
+    timerStop(axis.timer);
+    axis.timerRunning = false;
+  }
+  if (__atomic_load_n(&axis.pulseActive, __ATOMIC_ACQUIRE)) {
+    // Finish at least the TB6600 minimum active width before forcing idle.
+    delayMicroseconds(STEPPER_MIN_HALF_PERIOD_US);
+  }
+  digitalWrite(axis.stepPin, STEP_IDLE);
+  __atomic_store_n(&axis.pulseActive, false, __ATOMIC_RELEASE);
+}
+
+void stopMotionSegment() {
+  stopStepAxis(j1StepAxis);
+  stopStepAxis(j2StepAxis);
+  motionSegmentActive = false;
+  motorsMoving = false;
+}
+
+bool configureStepAxis(
+    StepAxisRuntime &axis, long deltaSteps, unsigned long durationUs) {
+  const long stepCount = labs(deltaSteps);
+  __atomic_store_n(&axis.remainingSteps, stepCount, __ATOMIC_RELEASE);
+  __atomic_store_n(&axis.emittedSteps, 0L, __ATOMIC_RELEASE);
+  __atomic_store_n(
+      &axis.direction, deltaSteps >= 0 ? 1 : -1, __ATOMIC_RELEASE);
+  __atomic_store_n(&axis.pulseActive, false, __ATOMIC_RELEASE);
+  if (stepCount == 0) {
+    __atomic_store_n(&axis.active, false, __ATOMIC_RELEASE);
+    return true;
+  }
+
+  const uint64_t denominator = static_cast<uint64_t>(stepCount) * 2ULL;
+  unsigned long halfPeriodUs = static_cast<unsigned long>(
+      (static_cast<uint64_t>(durationUs) + denominator - 1ULL) /
+      denominator);
+  halfPeriodUs = max(halfPeriodUs, STEPPER_MIN_HALF_PERIOD_US);
+  if (axis.timerRunning) timerStop(axis.timer);
+  timerRestart(axis.timer);
+  timerAlarm(axis.timer, halfPeriodUs, true, 0);
+  __atomic_store_n(&axis.active, true, __ATOMIC_RELEASE);
+  timerStart(axis.timer);
+  axis.timerRunning = true;
+  return true;
+}
+
+bool startSegment(
+    long deltaJ1, long deltaJ2, unsigned long requestedDurationUs) {
+  if (!stepperTimersReady || motionSegmentActive) {
+    Serial.println("ERROR: stepper timer engine unavailable or busy");
+    return false;
+  }
+  const long countJ1 = labs(deltaJ1);
+  const long countJ2 = labs(deltaJ2);
+  const unsigned long minimumDurationUs =
+      static_cast<unsigned long>(max(countJ1, countJ2)) *
+      STEPPER_MIN_STEP_PERIOD_US;
+  const unsigned long durationUs =
+      max(requestedDurationUs, minimumDurationUs);
+
+  setDirection(J1_DIR_PIN, deltaJ1, INVERT_J1);
+  setDirection(J2_DIR_PIN, deltaJ2, INVERT_J2);
+  delayMicroseconds(DIR_SETUP_US);
+
+  motionSegmentDurationUs = durationUs;
+  motionSegmentStartedUs = micros();
+  motionSegmentActive = true;
+  motorsMoving = true;
+  if (!configureStepAxis(j1StepAxis, deltaJ1, durationUs) ||
+      !configureStepAxis(j2StepAxis, deltaJ2, durationUs)) {
+    stopMotionSegment();
+    return false;
+  }
+  return true;
+}
+
+bool segmentInProgress() {
+  if (!motionSegmentActive) return false;
+  const bool j1Active =
+      __atomic_load_n(&j1StepAxis.active, __ATOMIC_ACQUIRE);
+  const bool j2Active =
+      __atomic_load_n(&j2StepAxis.active, __ATOMIC_ACQUIRE);
+  if (!j1Active && j1StepAxis.timerRunning) stopStepAxis(j1StepAxis);
+  if (!j2Active && j2StepAxis.timerRunning) stopStepAxis(j2StepAxis);
+  const bool durationPending =
+      static_cast<unsigned long>(micros() - motionSegmentStartedUs) <
+      motionSegmentDurationUs;
+  if (j1Active || j2Active || durationPending) return true;
+  motionSegmentActive = false;
+  motorsMoving = false;
+  return false;
+}
+
+long segmentEmittedStepEvents() {
+  return max(
+      __atomic_load_n(&j1StepAxis.emittedSteps, __ATOMIC_ACQUIRE),
+      __atomic_load_n(&j2StepAxis.emittedSteps, __ATOMIC_ACQUIRE));
 }
 
 bool encoderJointAngles(float &j1Deg, float &j2Deg) {
@@ -748,46 +939,32 @@ bool executeSteps(long deltaJ1, long deltaJ2) {
   const long countJ2 = labs(deltaJ2);
   const long total = max(countJ1, countJ2);
   if (total == 0) return true;
-  motorsMoving = true;
+  const unsigned long durationUs = static_cast<unsigned long>(
+      ceilf(total * 1000000.0f / DEFAULT_STEP_RATE_HZ));
+  if (!startSegment(deltaJ1, deltaJ2, durationUs)) return false;
 
-  setDirection(J1_DIR_PIN, deltaJ1, INVERT_J1);
-  setDirection(J2_DIR_PIN, deltaJ2, INVERT_J2);
-  delayMicroseconds(DIR_SETUP_US);
-
-  long errorJ1 = 0;
-  long errorJ2 = 0;
-  for (long i = 0; i < total; ++i) {
-    errorJ1 += countJ1;
-    errorJ2 += countJ2;
-    bool stepJ1 = false;
-    bool stepJ2 = false;
-    if (errorJ1 >= total) {
-      errorJ1 -= total;
-      stepJ1 = true;
-      j1PositionSteps += deltaJ1 >= 0 ? 1 : -1;
-    }
-    if (errorJ2 >= total) {
-      errorJ2 -= total;
-      stepJ2 = true;
-      j2PositionSteps += deltaJ2 >= 0 ? 1 : -1;
-    }
-    pulseSelectedAxes(stepJ1, stepJ2);
+  long lastFeedbackSteps = 0;
+  while (segmentInProgress()) {
     serviceControlInputs();
     serviceEncoderStream();
-    if (productCutActive) {
-      if (productAbortRequested) {
-        Serial.println("CUT_ABORTED");
-        motorsMoving = false;
+    if (productCutActive && productAbortRequested) {
+      stopMotionSegment();
+      Serial.println("CUT_ABORTED");
+      return false;
+    }
+    const long emittedSteps = segmentEmittedStepEvents();
+    if (emittedSteps - lastFeedbackSteps >=
+            CONTINUOUS_FEEDBACK_STEP_INTERVAL) {
+      lastFeedbackSteps = emittedSteps;
+      if (!checkFeedback()) {
+        stopMotionSegment();
         return false;
       }
     }
-    if (USE_ENCODERS && (i & 255) == 255 && !checkFeedback()) {
-      motorsMoving = false;
-      return false;
-    }
+    delay(0);
   }
+  stopMotionSegment();
   const bool feedbackOk = checkFeedback();
-  motorsMoving = false;
   return feedbackOk;
 }
 
@@ -819,8 +996,9 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
   for (int correction = 0; correction <= FEEDBACK_MAX_CORRECTIONS; ++correction) {
     long targetJ1 = lroundf(j1Deg * J1_STEPS_PER_DEG);
     long targetJ2 = lroundf(j2Deg * J2_STEPS_PER_DEG);
-    if (!executeSteps(targetJ1 - j1PositionSteps,
-                      targetJ2 - j2PositionSteps)) return false;
+    if (!executeSteps(
+            targetJ1 - atomicReadSteps(j1PositionSteps),
+            targetJ2 - atomicReadSteps(j2PositionSteps))) return false;
     if (!USE_ENCODERS || !encoderFeedbackEnabled) break;
 
     float measuredJ1 = 0.0f;
@@ -843,10 +1021,12 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
       return false;
     }
     if (armMode != AxisMode::J2_ONLY) {
-      j1PositionSteps = lroundf(measuredJ1 * J1_STEPS_PER_DEG);
+      atomicWriteSteps(
+          j1PositionSteps, lroundf(measuredJ1 * J1_STEPS_PER_DEG));
     }
     if (armMode != AxisMode::J1_ONLY) {
-      j2PositionSteps = lroundf(measuredJ2 * J2_STEPS_PER_DEG);
+      atomicWriteSteps(
+          j2PositionSteps, lroundf(measuredJ2 * J2_STEPS_PER_DEG));
     }
   }
   if (report) {
@@ -978,11 +1158,19 @@ bool cutLine(float x0, float y0, float x1, float y1, bool elbowDown) {
       return false;
     }
   }
-  for (int i = 0; i <= segments; ++i) {
+
+  bladeRetracted(true);
+  if (!moveToXY(x0, y0, elbowDown)) return false;
+  bladeDown();
+  for (int i = 1; i <= segments; ++i) {
     const float fraction = static_cast<float>(i) / segments;
     if (!moveToXY(x0 + (x1 - x0) * fraction,
-                  y0 + (y1 - y0) * fraction, elbowDown)) return false;
+                  y0 + (y1 - y0) * fraction, elbowDown)) {
+      if (bladeIsDown()) bladeRetracted();
+      return false;
+    }
   }
+  if (bladeIsDown()) bladeRetracted();
   Serial.println("OK");
   printOperationReport("CUT_LINE_COMPLETE");
   return true;
@@ -1189,19 +1377,12 @@ void recordTeach(float seconds, float hz, bool j1Only,
 
 bool serviceContinuousTrajectory() {
   serviceControlInputs();
+  serviceEncoderStream();
   if (productCutActive && productAbortRequested) {
     Serial.println("CUT_ABORTED");
     return false;
   }
   return true;
-}
-
-bool waitForContinuousDeadline(unsigned long deadlineUs) {
-  while (static_cast<long>(micros() - deadlineUs) < 0) {
-    if (!serviceContinuousTrajectory()) return false;
-    delayMicroseconds(50);
-  }
-  return serviceContinuousTrajectory();
 }
 
 float continuousTrajectoryTimeScale() {
@@ -1220,7 +1401,7 @@ float continuousTrajectoryTimeScale() {
     const long stepEvents =
         max(labs(targetJ1 - previousJ1), labs(targetJ2 - previousJ2));
     const float minimumSeconds =
-        stepEvents * CONTINUOUS_MIN_STEP_INTERVAL_US / 1000000.0f;
+        stepEvents * STEPPER_MIN_STEP_PERIOD_US / 1000000.0f;
     timeScale = max(
         timeScale,
         minimumSeconds * CONTINUOUS_TIMING_MARGIN / durationSeconds);
@@ -1238,8 +1419,8 @@ bool executeContinuousTrajectory(int &stoppedPoint) {
   for (int i = 1; i < taughtCount; ++i) {
     const long targetJ1 = lroundf(taught[i].j1Deg * J1_STEPS_PER_DEG);
     const long targetJ2 = lroundf(taught[i].j2Deg * J2_STEPS_PER_DEG);
-    const long deltaJ1 = targetJ1 - j1PositionSteps;
-    const long deltaJ2 = targetJ2 - j2PositionSteps;
+    const long deltaJ1 = targetJ1 - atomicReadSteps(j1PositionSteps);
+    const long deltaJ2 = targetJ2 - atomicReadSteps(j2PositionSteps);
     const long countJ1 = labs(deltaJ1);
     const long countJ2 = labs(deltaJ2);
     const long total = max(countJ1, countJ2);
@@ -1251,62 +1432,34 @@ bool executeContinuousTrajectory(int &stoppedPoint) {
     unsigned long durationUs = static_cast<unsigned long>(
         lroundf(durationSeconds * timeScale * 1000000.0f));
     const unsigned long minimumDurationUs =
-        static_cast<unsigned long>(total) * CONTINUOUS_MIN_STEP_INTERVAL_US;
+        static_cast<unsigned long>(total) * STEPPER_MIN_STEP_PERIOD_US;
     if (durationUs < minimumDurationUs) durationUs = minimumDurationUs;
 
-    setDirection(J1_DIR_PIN, deltaJ1, INVERT_J1);
-    setDirection(J2_DIR_PIN, deltaJ2, INVERT_J2);
-    delayMicroseconds(DIR_SETUP_US);
-    const unsigned long segmentStartedUs = micros();
-    long errorJ1 = 0;
-    long errorJ2 = 0;
-
-    for (long event = 0; event < total; ++event) {
-      const unsigned long deadlineUs =
-          segmentStartedUs + static_cast<unsigned long>(
-              (static_cast<uint64_t>(event) * durationUs) / total);
-      if (!waitForContinuousDeadline(deadlineUs)) {
-        stoppedPoint = i;
-        motorsMoving = false;
-        return false;
-      }
-
-      errorJ1 += countJ1;
-      errorJ2 += countJ2;
-      bool stepJ1 = false;
-      bool stepJ2 = false;
-      if (errorJ1 >= total) {
-        errorJ1 -= total;
-        stepJ1 = true;
-        j1PositionSteps += deltaJ1 >= 0 ? 1 : -1;
-      }
-      if (errorJ2 >= total) {
-        errorJ2 -= total;
-        stepJ2 = true;
-        j2PositionSteps += deltaJ2 >= 0 ? 1 : -1;
-      }
-      pulseSelectedAxes(stepJ1, stepJ2);
-
+    if (!startSegment(deltaJ1, deltaJ2, durationUs)) {
+      stoppedPoint = i;
+      return false;
+    }
+    long lastSegmentFeedbackSteps = 0;
+    while (segmentInProgress()) {
       if (!serviceContinuousTrajectory()) {
+        stopMotionSegment();
         stoppedPoint = i;
-        motorsMoving = false;
         return false;
       }
-      if (++stepsSinceFeedback >= CONTINUOUS_FEEDBACK_STEP_INTERVAL) {
-        stepsSinceFeedback = 0;
+      const long emittedSteps = segmentEmittedStepEvents();
+      stepsSinceFeedback += emittedSteps - lastSegmentFeedbackSteps;
+      lastSegmentFeedbackSteps = emittedSteps;
+      if (stepsSinceFeedback >= CONTINUOUS_FEEDBACK_STEP_INTERVAL) {
+        stepsSinceFeedback %= CONTINUOUS_FEEDBACK_STEP_INTERVAL;
         if (!checkFeedback()) {
+          stopMotionSegment();
           stoppedPoint = i;
-          motorsMoving = false;
           return false;
         }
       }
+      delay(0);
     }
-
-    if (!waitForContinuousDeadline(segmentStartedUs + durationUs)) {
-      stoppedPoint = i;
-      motorsMoving = false;
-      return false;
-    }
+    stopMotionSegment();
   }
   motorsMoving = false;
   return true;
@@ -1324,8 +1477,10 @@ bool replayTeach(bool operateBlade = false) {
     feedbackFault("AS5600 read failed before replay");
     return false;
   }
-  j1PositionSteps = lroundf(measuredJ1 * J1_STEPS_PER_DEG);
-  j2PositionSteps = lroundf(measuredJ2 * J2_STEPS_PER_DEG);
+  atomicWriteSteps(
+      j1PositionSteps, lroundf(measuredJ1 * J1_STEPS_PER_DEG));
+  atomicWriteSteps(
+      j2PositionSteps, lroundf(measuredJ2 * J2_STEPS_PER_DEG));
   enableDrivers();
   armed = true;
   Serial.print("PLAY RETURN: J1 ");
@@ -1336,11 +1491,13 @@ bool replayTeach(bool operateBlade = false) {
   Serial.print(measuredJ2, 2);
   Serial.print(" -> ");
   Serial.println(taught[0].j2Deg, 2);
+  if (operateBlade) bladeRetracted(true);
   if (!moveToAngles(taught[0].j1Deg, taught[0].j2Deg, false)) {
     disableDrivers();
+    if (operateBlade && bladeIsDown()) bladeRetracted();
     return false;
   }
-  if (operateBlade) extendBlade();
+  if (operateBlade) bladeDown();
 
   int stoppedPoint = -1;
   if (CONTINUOUS_TRAJECTORY_REPLAY) {
@@ -1363,13 +1520,13 @@ bool replayTeach(bool operateBlade = false) {
     Serial.print("/");
     Serial.println(taughtCount - 1);
     disableDrivers();
-    if (bladeExtended) retractBlade();
+    if (bladeIsDown()) bladeRetracted();
     if (!operateBlade) printOperationReport("PLAY_STOPPED");
     return false;
   }
 
   disableDrivers();
-  if (bladeExtended) retractBlade();
+  if (bladeIsDown()) bladeRetracted();
   Serial.print("PLAYED: ");
   Serial.print(taughtCount);
   Serial.println(" points");
@@ -1494,8 +1651,8 @@ void stopProductTeach(unsigned long now) {
     taughtCount = 0;
     return;
   }
-  j1PositionSteps = lroundf(j1 * J1_STEPS_PER_DEG);
-  j2PositionSteps = lroundf(j2 * J2_STEPS_PER_DEG);
+  atomicWriteSteps(j1PositionSteps, lroundf(j1 * J1_STEPS_PER_DEG));
+  atomicWriteSteps(j2PositionSteps, lroundf(j2 * J2_STEPS_PER_DEG));
   Serial.print("TRACING_STOPPED POINTS=");
   Serial.println(taughtCount);
   printOperationReport("TRACING_COMPLETE");
@@ -1538,7 +1695,7 @@ void runProductCut(bool repeat) {
   productCutActive = false;
   productState = ProductState::IDLE;
   disableDrivers();
-  if (bladeExtended) retractBlade();
+  if (bladeIsDown()) bladeRetracted();
   if (completed) {
     productHasLastCut = true;
     Serial.println(repeat ? "REPEAT_COMPLETE" : "CUT_COMPLETE");
@@ -1641,7 +1798,7 @@ void cutLoadedPath() {
   productCutActive = false;
   productState = ProductState::IDLE;
   disableDrivers();
-  if (bladeExtended) retractBlade();
+  if (bladeIsDown()) bladeRetracted();
   if (completed) {
     productHasLastCut = true;
     Serial.println("CUT_COMPLETE");
@@ -1666,7 +1823,7 @@ void handleProductButtonChange(const ButtonInput &button) {
       armMode = AxisMode::DUAL;
       productReady = false;
       productState = ProductState::IDLE;
-      if (bladeExtended) retractBlade();
+      if (bladeIsDown()) bladeRetracted();
       Serial.println("DISARMED_BY_BUTTON");
       printOperationReport("DISARMED");
     } else {
@@ -1761,12 +1918,14 @@ void printHelp() {
   Serial.println("  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS");
   Serial.println("  CONTROLS | CONTROL TEST ON/OFF | STATE TEST ON/OFF");
   Serial.println("  PLAY | CLEAR | POS | HELP");
+  Serial.println("  BLADE RETRACTED | BLADE DOWN");
 }
 
 void armAtFoldedPose(AxisMode mode) {
   disableDrivers();
-  j1PositionSteps = 0;
-  j2PositionSteps = lroundf(180.0f * J2_STEPS_PER_DEG);
+  atomicWriteSteps(j1PositionSteps, 0);
+  atomicWriteSteps(
+      j2PositionSteps, lroundf(180.0f * J2_STEPS_PER_DEG));
   encoderFault = false;
   armMode = mode;
   encodersCalibrated = false;
@@ -1821,6 +1980,18 @@ void handleCommand(String command) {
         "ERROR: input test is active; turn the test OFF first");
     return;
   }
+  if (command == "BLADE RETRACTED") {
+    bladeRetracted(true);
+    return;
+  }
+  if (command == "BLADE DOWN") {
+    bladeDown(true);
+    return;
+  }
+  if (command.startsWith("BLADE ")) {
+    Serial.println("ERROR: use BLADE RETRACTED or BLADE DOWN");
+    return;
+  }
 
   if (command == "ARM FOLDED") return armAtFoldedPose(AxisMode::DUAL);
   if (command == "ARM J1") return armAtFoldedPose(AxisMode::J1_ONLY);
@@ -1830,7 +2001,7 @@ void handleCommand(String command) {
     armMode = AxisMode::DUAL;
     productReady = false;
     productState = ProductState::IDLE;
-    if (bladeExtended) retractBlade();
+    if (bladeIsDown()) bladeRetracted();
     Serial.println("DISARMED");
     printOperationReport("DISARMED");
     return;
@@ -2030,6 +2201,7 @@ void setup() {
 
   Serial.begin(115200);
   Serial.setTimeout(50);
+  stepperTimersReady = initializeStepperTimers();
   const unsigned long controlsStartedMs = millis();
   for (size_t i = 0; i < BUTTON_COUNT; ++i) {
     buttons[i].rawState = digitalRead(buttons[i].pin);
