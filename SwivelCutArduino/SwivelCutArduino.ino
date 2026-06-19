@@ -59,6 +59,10 @@ constexpr float J1_GEAR_RATIO = 6.0f;
 constexpr float J2_GEAR_RATIO = 9.0f;
 constexpr float LINK_1_MM = 200.0f;
 constexpr float LINK_2_MM = 200.0f;
+// Positive when the cutter tip extends farther from J2 than the tracer tip.
+// Set this to the measured attachment difference.
+constexpr float CUTTER_EXTRA_LENGTH_MM = 5.0f;
+constexpr float CUTTER_LINK_2_MM = LINK_2_MM + CUTTER_EXTRA_LENGTH_MM;
 
 constexpr float J1_MIN_DEG = -90.0f;
 constexpr float J1_MAX_DEG = 90.0f;
@@ -1259,11 +1263,16 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
   return true;
 }
 
-void forwardKinematics(float j1Deg, float j2Deg, float &x, float &y) {
+void forwardKinematicsForLink2(
+    float j1Deg, float j2Deg, float link2Mm, float &x, float &y) {
   const float t1 = radians(j1Deg);
   const float t2 = radians(j2Deg);
-  y = LINK_1_MM * cosf(t1) + LINK_2_MM * cosf(t2 - t1);
-  x = -LINK_1_MM * sinf(t1) + LINK_2_MM * sinf(t2 - t1);
+  y = LINK_1_MM * cosf(t1) + link2Mm * cosf(t2 - t1);
+  x = -LINK_1_MM * sinf(t1) + link2Mm * sinf(t2 - t1);
+}
+
+void forwardKinematics(float j1Deg, float j2Deg, float &x, float &y) {
+  forwardKinematicsForLink2(j1Deg, j2Deg, LINK_2_MM, x, y);
 }
 
 void printOperationReport(const char *label) {
@@ -1316,20 +1325,58 @@ void printOperationReport(const char *label) {
   Serial.println();
 }
 
-bool inverseKinematics(float x, float y, bool elbowDown,
-                       float &j1Deg, float &j2Deg) {
+bool inverseKinematicsForLink2(
+    float x, float y, bool elbowDown, float link2Mm,
+    float &j1Deg, float &j2Deg) {
   float c2 = (x * x + y * y - LINK_1_MM * LINK_1_MM -
-              LINK_2_MM * LINK_2_MM) / (2.0f * LINK_1_MM * LINK_2_MM);
+              link2Mm * link2Mm) / (2.0f * LINK_1_MM * link2Mm);
   if (c2 < -1.00001f || c2 > 1.00001f) return false;
   c2 = constrain(c2, -1.0f, 1.0f);
   float s2 = sqrtf(max(0.0f, 1.0f - c2 * c2));
   if (elbowDown) s2 = -s2;
   const float t2 = atan2f(s2, c2);
   const float t1 = atan2f(x, y) -
-                   atan2f(LINK_2_MM * s2, LINK_1_MM + LINK_2_MM * c2);
+                   atan2f(link2Mm * s2, LINK_1_MM + link2Mm * c2);
   j1Deg = -degrees(t1);
   j2Deg = degrees(t2);
   return angleInRange(j1Deg, j2Deg);
+}
+
+bool inverseKinematics(float x, float y, bool elbowDown,
+                       float &j1Deg, float &j2Deg) {
+  return inverseKinematicsForLink2(
+      x, y, elbowDown, LINK_2_MM, j1Deg, j2Deg);
+}
+
+bool compensateTaughtPathForCutter() {
+  if (fabsf(CUTTER_EXTRA_LENGTH_MM) < 0.0001f) return true;
+
+  for (int i = 0; i < taughtCount; ++i) {
+    float tracedX = 0.0f;
+    float tracedY = 0.0f;
+    forwardKinematicsForLink2(
+        taught[i].j1Deg, taught[i].j2Deg, LINK_2_MM, tracedX, tracedY);
+    const bool elbowDown = taught[i].j2Deg < 0.0f;
+    float cutterJ1 = 0.0f;
+    float cutterJ2 = 0.0f;
+    if (!inverseKinematicsForLink2(
+            tracedX, tracedY, elbowDown, CUTTER_LINK_2_MM,
+            cutterJ1, cutterJ2)) {
+      Serial.print("ERROR_CUTTER_LENGTH_COMPENSATION POINT=");
+      Serial.print(i);
+      Serial.print(" X=");
+      Serial.print(tracedX, 2);
+      Serial.print(" Y=");
+      Serial.println(tracedY, 2);
+      return false;
+    }
+    taught[i].j1Deg = cutterJ1;
+    taught[i].j2Deg = cutterJ2;
+  }
+
+  Serial.print("CUTTER_LENGTH_COMPENSATION_MM=");
+  Serial.println(CUTTER_EXTRA_LENGTH_MM, 2);
+  return true;
 }
 
 void printPosition() {
@@ -1907,6 +1954,7 @@ void runProductCut(bool repeat) {
   prepareTaughtPath(
       stabilizationEnabled ? PRODUCT_SMOOTHING_MS : 0.0f,
       stabilizationEnabled ? PRODUCT_MAX_DEVIATION_DEG : 0.0f);
+  if (!compensateTaughtPathForCutter()) return;
   taughtJ1Only = false;
   productState = ProductState::CUTTING;
   repeatCutActive = repeat;

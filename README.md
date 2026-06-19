@@ -106,6 +106,14 @@ new movement or use Repeat for another pass.
 The firmware prints a `REPORT` after operations with software J1/J2, XY,
 encoder J1/J2, and raw encoder counts.
 
+## Attachment Length Compensation
+
+`CUTTER_EXTRA_LENGTH_MM` near the top of the firmware defaults to `5.0`. It is
+the amount by which the cutter extends farther from J2 than the tracer. Before
+each physical cut or repeat, the traced joint path is converted to XY using the
+tracer length and solved again using the longer cutter length. This preserves
+the traced tip path without accumulating an offset between repeat cuts.
+
 ## Serial Commands
 
 Key commands include:

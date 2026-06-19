@@ -45,5 +45,12 @@ assert.match(
 );
 assert.match(firmware, /command == "RELAY ON"\) return setMachinePower\(true\)/);
 assert.match(firmware, /command == "RELAY OFF"\) return setMachinePower\(false\)/);
+assert.match(firmware, /constexpr float CUTTER_EXTRA_LENGTH_MM = 5\.0f;/);
+assert.match(firmware, /constexpr float CUTTER_LINK_2_MM = LINK_2_MM \+ CUTTER_EXTRA_LENGTH_MM;/);
+assert.match(firmware, /bool compensateTaughtPathForCutter\(\)/);
+assert.match(
+  firmware,
+  /prepareTaughtPath\([\s\S]*if \(!compensateTaughtPathForCutter\(\)\) return;/,
+);
 
 console.log("panel control tests: OK");
