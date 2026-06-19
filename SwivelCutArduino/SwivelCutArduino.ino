@@ -35,7 +35,6 @@ constexpr bool BUTTON_LEDS_COMMON_ANODE = false;
 constexpr int HEAD_ID_PIN = 34;
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 35;
 constexpr unsigned long HEAD_SAMPLE_INTERVAL_MS = 20;
-constexpr unsigned long CONTROL_TEST_REPORT_MS = 500;
 constexpr int HEAD_STABLE_SAMPLE_COUNT = 5;
 
 constexpr int CUTTING_HEAD_ADC_MIN = 400;
@@ -352,7 +351,6 @@ bool headTypeInitialized = false;
 unsigned long nextHeadSampleMs = 0;
 bool controlTestEnabled = false;
 bool stateTestEnabled = false;
-unsigned long nextControlTestReportMs = 0;
 bool testTeachingActive = false;
 bool testStabilizationEnabled = false;
 bool testHasLastCut = false;
@@ -754,11 +752,6 @@ void serviceControlInputs() {
     }
   }
 
-  if (controlTestEnabled &&
-      static_cast<long>(now - nextControlTestReportMs) >= 0) {
-    nextControlTestReportMs = now + CONTROL_TEST_REPORT_MS;
-    printControlStatus();
-  }
 }
 
 void setControlTest(bool enabled) {
@@ -789,10 +782,9 @@ void setControlTest(bool enabled) {
   }
   controlTestButtonOn[3] = relayConnected;
   nextHeadSampleMs = 0;
-  nextControlTestReportMs = now;
   Serial.println(
       "CONTROL TEST ON: motors and blade outputs disabled; "
-      "buttons toggle their LED and button 4 also toggles the relay");
+      "printing only when a button, LED, relay, or head state changes");
   refreshButtonLeds();
   printControlStatus();
 }

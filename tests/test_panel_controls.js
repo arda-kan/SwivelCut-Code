@@ -20,5 +20,7 @@ assert.match(firmware, /command == "PINS"/);
 assert.match(firmware, /command == "RELAY ON"/);
 assert.match(firmware, /command == "RELAY OFF"/);
 assert.doesNotMatch(firmware, /ARM_TOGGLE_BUTTON_PIN/);
+assert.doesNotMatch(firmware, /CONTROL_TEST_REPORT_MS/);
+assert.doesNotMatch(firmware, /nextControlTestReportMs/);
 
 console.log("panel control tests: OK");

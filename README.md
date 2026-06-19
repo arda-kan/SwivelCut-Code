@@ -134,8 +134,9 @@ HELP
 
 `CONTROL TEST ON` disables the motors and blade, prints debounced button
 press/release levels, toggles the corresponding red/green LED on every press,
-and allows button 4 to exercise the relay. `CONTROLS`, `LEDS`, and `PINS`
-provide one-shot serial wiring reports.
+and allows button 4 to exercise the relay. After its initial snapshot, output
+is printed only when a button, LED, relay, or head state changes. `CONTROLS`,
+`LEDS`, and `PINS` provide one-shot serial wiring reports.
 
 When `XY` omits `UP` or `DOWN`, the firmware automatically prefers `UP` for
 positive X and `DOWN` for negative X, then tries the other branch if the
