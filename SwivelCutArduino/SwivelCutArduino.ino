@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <FastLED.h>
 #include <Wire.h>
 #include <driver/gpio.h>
 #include <math.h>
@@ -18,20 +19,19 @@ constexpr float BLADE_DOWN_SECONDS = 0.75f;
 constexpr float BLADE_RETRACT_SECONDS = 0.75f;
 constexpr bool BLADE_REVERSE_TO_RETRACT = true;
 
-constexpr int START_STOP_BUTTON_PIN = 5;
-constexpr int STABILIZATION_BUTTON_PIN = 22;
-constexpr int REPEAT_BUTTON_PIN = 23;
-constexpr int RELAY_BUTTON_PIN = 21;
+constexpr int START_STOP_BUTTON_PIN = 36;    // VP; external pull-up required.
+constexpr int STABILIZATION_BUTTON_PIN = 39; // VN; external pull-up required.
+constexpr int REPEAT_BUTTON_PIN = 0;
+constexpr int RELAY_BUTTON_PIN = 2;
 constexpr int RELAY_PIN = 15;
 constexpr uint8_t RELAY_CONNECTED_LEVEL = HIGH;
 constexpr uint8_t RELAY_DISCONNECTED_LEVEL = LOW;
 
-// Set these eight values from the LED wiring sketch. A value of -1 leaves that
-// color output disabled, which prevents accidental GPIO conflicts while the
-// final panel wiring is being confirmed.
-constexpr int BUTTON_LED_RED_PINS[] = {-1, -1, -1, -1};
-constexpr int BUTTON_LED_GREEN_PINS[] = {-1, -1, -1, -1};
-constexpr bool BUTTON_LEDS_COMMON_ANODE = false;
+// Four WS2812 pixels from the supplied working FastLED sketch.
+constexpr int BUTTON_LED_DATA_PIN = 4;
+constexpr int BUTTON_LED_COUNT = 4;
+constexpr uint8_t BUTTON_LED_BRIGHTNESS = 64;
+CRGB buttonLedPixels[BUTTON_LED_COUNT];
 constexpr int HEAD_ID_PIN = 34;
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 35;
 constexpr unsigned long HEAD_SAMPLE_INTERVAL_MS = 20;
@@ -149,8 +149,7 @@ enum class LedColor {
 };
 
 struct ButtonLed {
-  int redPin;
-  int greenPin;
+  int pixelIndex;
   int number;
   const char *name;
   LedColor color;
@@ -323,24 +322,14 @@ ButtonInput buttons[] = {
     {RELAY_BUTTON_PIN, 4, "RELAY", HIGH, HIGH, 0},
 };
 constexpr size_t BUTTON_COUNT = sizeof(buttons) / sizeof(buttons[0]);
-static_assert(
-    sizeof(BUTTON_LED_RED_PINS) / sizeof(BUTTON_LED_RED_PINS[0]) ==
-        BUTTON_COUNT,
-    "Each button needs one red LED pin entry");
-static_assert(
-    sizeof(BUTTON_LED_GREEN_PINS) / sizeof(BUTTON_LED_GREEN_PINS[0]) ==
-        BUTTON_COUNT,
-    "Each button needs one green LED pin entry");
+static_assert(BUTTON_LED_COUNT == BUTTON_COUNT,
+              "The WS2812 strip needs one pixel per button");
 
 ButtonLed buttonLeds[] = {
-    {BUTTON_LED_RED_PINS[0], BUTTON_LED_GREEN_PINS[0], 1, "START_STOP",
-     LedColor::OFF},
-    {BUTTON_LED_RED_PINS[1], BUTTON_LED_GREEN_PINS[1], 2, "STABILIZATION",
-     LedColor::OFF},
-    {BUTTON_LED_RED_PINS[2], BUTTON_LED_GREEN_PINS[2], 3, "REPEAT",
-     LedColor::OFF},
-    {BUTTON_LED_RED_PINS[3], BUTTON_LED_GREEN_PINS[3], 4, "RELAY",
-     LedColor::OFF},
+    {0, 1, "START_STOP", LedColor::OFF},
+    {1, 2, "STABILIZATION", LedColor::OFF},
+    {2, 3, "REPEAT", LedColor::OFF},
+    {3, 4, "RELAY", LedColor::OFF},
 };
 
 HeadType stableHeadType = HeadType::UNKNOWN;
@@ -414,10 +403,6 @@ void printOperationReport(const char *label);
 void armAtFoldedPose(AxisMode mode);
 void refreshButtonLeds();
 
-bool outputPinConfigured(int pin) {
-  return pin >= 0;
-}
-
 const char *ledColorName(LedColor color) {
   switch (color) {
     case LedColor::RED:
@@ -430,14 +415,11 @@ const char *ledColorName(LedColor color) {
 }
 
 void writeButtonLed(ButtonLed &led, LedColor color) {
-  const uint8_t onLevel = BUTTON_LEDS_COMMON_ANODE ? LOW : HIGH;
-  const uint8_t offLevel = BUTTON_LEDS_COMMON_ANODE ? HIGH : LOW;
-  if (outputPinConfigured(led.redPin)) {
-    digitalWrite(led.redPin, color == LedColor::RED ? onLevel : offLevel);
-  }
-  if (outputPinConfigured(led.greenPin)) {
-    digitalWrite(led.greenPin, color == LedColor::GREEN ? onLevel : offLevel);
-  }
+  buttonLedPixels[led.pixelIndex] =
+      color == LedColor::RED
+          ? CRGB::Red
+          : (color == LedColor::GREEN ? CRGB::Green : CRGB::Black);
+  FastLED.show();
   led.color = color;
 }
 
@@ -636,10 +618,8 @@ void printControlStatus() {
     Serial.print(buttonLeds[i].number);
     Serial.print("=");
     Serial.print(ledColorName(buttonLeds[i].color));
-    Serial.print("(R");
-    Serial.print(buttonLeds[i].redPin);
-    Serial.print(",G");
-    Serial.print(buttonLeds[i].greenPin);
+    Serial.print("(PIXEL");
+    Serial.print(buttonLeds[i].pixelIndex);
     Serial.print(")");
   }
   latestHeadAdc = analogRead(HEAD_ID_PIN);
@@ -660,11 +640,11 @@ void printLedStatus() {
     Serial.print(buttonLeds[i].name);
     Serial.print("=");
     Serial.print(ledColorName(buttonLeds[i].color));
-    Serial.print(" R_GPIO=");
-    Serial.print(buttonLeds[i].redPin);
-    Serial.print(" G_GPIO=");
-    Serial.print(buttonLeds[i].greenPin);
+    Serial.print(" PIXEL=");
+    Serial.print(buttonLeds[i].pixelIndex);
   }
+  Serial.print(" DATA_GPIO=");
+  Serial.print(BUTTON_LED_DATA_PIN);
   Serial.println();
 }
 
@@ -677,11 +657,17 @@ void printPanelPinMap() {
     Serial.print(buttons[i].name);
     Serial.print(" button=GPIO");
     Serial.print(buttons[i].pin);
-    Serial.print(" pressed=LOW red=GPIO");
-    Serial.print(buttonLeds[i].redPin);
-    Serial.print(" green=GPIO");
-    Serial.println(buttonLeds[i].greenPin);
+    Serial.print(" pressed=LOW input=");
+    Serial.print(
+        buttons[i].pin == 36 || buttons[i].pin == 39
+            ? "EXTERNAL_PULLUP"
+            : "INPUT_PULLUP");
+    Serial.print(" led=WS2812_PIXEL");
+    Serial.println(buttonLeds[i].pixelIndex);
   }
+  Serial.print("  WS2812 data=GPIO");
+  Serial.print(BUTTON_LED_DATA_PIN);
+  Serial.println(" count=4 order=GRB brightness=64");
   Serial.print("  Relay=GPIO");
   Serial.print(RELAY_PIN);
   Serial.println(" connected=HIGH disconnected=LOW");
@@ -2085,7 +2071,8 @@ void printHelp() {
   Serial.println("  Stabilization: toggle while idle");
   Serial.println("  Repeat: press once to run the full repeat");
   Serial.println("  Relay (button 4): toggle GPIO15 HIGH/LOW");
-  Serial.println("  LEDs: red=off, green=on; CONTROL TEST toggles each LED");
+  Serial.println(
+      "  WS2812 LEDs (GPIO4): red=off, green=on; one pixel per button");
   Serial.println("  Product buttons are ignored while motors are moving");
   Serial.println("Commands:");
   Serial.println("  ARM FOLDED | ARM J1 | ARM J2 | DISARM");
@@ -2375,23 +2362,17 @@ void setup() {
   pinMode(ENA_PIN, OUTPUT);
   pinMode(BLADE_IN1_PIN, OUTPUT);
   pinMode(BLADE_IN2_PIN, OUTPUT);
-  pinMode(START_STOP_BUTTON_PIN, INPUT_PULLUP);
-  pinMode(STABILIZATION_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(START_STOP_BUTTON_PIN, INPUT);
+  pinMode(STABILIZATION_BUTTON_PIN, INPUT);
   pinMode(REPEAT_BUTTON_PIN, INPUT_PULLUP);
   pinMode(RELAY_BUTTON_PIN, INPUT_PULLUP);
   digitalWrite(RELAY_PIN, RELAY_DISCONNECTED_LEVEL);
   pinMode(RELAY_PIN, OUTPUT);
-  const uint8_t ledOffLevel = BUTTON_LEDS_COMMON_ANODE ? HIGH : LOW;
-  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
-    if (outputPinConfigured(buttonLeds[i].redPin)) {
-      digitalWrite(buttonLeds[i].redPin, ledOffLevel);
-      pinMode(buttonLeds[i].redPin, OUTPUT);
-    }
-    if (outputPinConfigured(buttonLeds[i].greenPin)) {
-      digitalWrite(buttonLeds[i].greenPin, ledOffLevel);
-      pinMode(buttonLeds[i].greenPin, OUTPUT);
-    }
-  }
+  FastLED.addLeds<WS2812, BUTTON_LED_DATA_PIN, GRB>(
+      buttonLedPixels, BUTTON_LED_COUNT);
+  FastLED.setBrightness(BUTTON_LED_BRIGHTNESS);
+  fill_solid(buttonLedPixels, BUTTON_LED_COUNT, CRGB::Black);
+  FastLED.show();
   pinMode(HEAD_ID_PIN, INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(HEAD_ID_PIN, ADC_11db);
@@ -2425,11 +2406,6 @@ void setup() {
   Serial.println("Product buttons become active after ARM FOLDED.");
   Serial.println("Type CONTROL TEST ON to test buttons, LEDs, relay, and head ID.");
   printPanelPinMap();
-  if (!outputPinConfigured(buttonLeds[0].redPin)) {
-    Serial.println(
-        "WARNING: LED GPIOs are -1 because the uploaded LED example was "
-        "identical to the firmware; set BUTTON_LED_*_PINS before LED testing.");
-  }
   refreshButtonLeds();
   printHelp();
 }

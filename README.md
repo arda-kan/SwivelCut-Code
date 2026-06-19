@@ -41,26 +41,26 @@ Coordinates use positive X to the physical right and positive Y forward.
 | Blade H-bridge inputs | 13, 14 |
 | J1 AS5600 SDA, SCL | 18, 19 |
 | J2 AS5600 SDA, SCL | 16, 17 |
-| Start/Stop button | 5 |
-| Stabilization button | 22 |
-| Repeat button | 23 |
-| Relay toggle button | 21 |
+| Start/Stop button (VP, external pull-up) | 36 |
+| Stabilization button (VN, external pull-up) | 39 |
+| Repeat button | 0 |
+| Relay toggle button | 2 |
 | Relay control (HIGH = connected) | 15 |
+| Four WS2812 LED data | 4 |
 | Head-ID ADC | 34 |
 
 Each AS5600 uses address `0x36` on its own ESP32 I2C controller. Power both
 encoder modules from 3.3 V. The buses run at 100 kHz and retry transient reads
 three times before declaring a feedback fault.
 
-Buttons are normally open to GND and use `INPUT_PULLUP`. Pressed is LOW.
-Button 4 toggles the relay: GPIO15 HIGH connects it and LOW disconnects it.
+Buttons are normally open to GND and pressed is LOW. GPIO36 and GPIO39 have no
+internal pull-ups and require the external 10 kΩ pull-ups used by the supplied
+button test. GPIO0 and GPIO2 use `INPUT_PULLUP`. Button 4 toggles the relay:
+GPIO15 HIGH connects it and LOW disconnects it.
 
-The four red/green button LEDs are configured through
-`BUTTON_LED_RED_PINS` and `BUTTON_LED_GREEN_PINS` at the top of the firmware.
-They currently default to `-1` (disabled) because the uploaded LED example was
-an identical copy of the firmware and did not contain the LED GPIO map. Set the
-eight entries to the panel wiring before testing. Set
-`BUTTON_LEDS_COMMON_ANODE` to match the LED electrical arrangement.
+The four indicators are WS2812 addressable LEDs on GPIO4, using GRB order and
+brightness 64, matching the supplied FastLED sketch. Pixels 0–3 correspond to
+buttons 1–4. Red means off and green means on.
 
 ## Head Identification
 
