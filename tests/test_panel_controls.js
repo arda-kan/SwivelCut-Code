@@ -15,7 +15,7 @@ assert.match(firmware, /constexpr uint8_t RELAY_CONNECTED_LEVEL = HIGH;/);
 assert.match(firmware, /constexpr uint8_t RELAY_DISCONNECTED_LEVEL = LOW;/);
 assert.match(
   firmware,
-  /if \(button\.number == 4\) \{\s+if \(!pressed\) return;\s+setRelayConnected\(!relayConnected\);/,
+  /if \(button\.number == 4\) \{\s+if \(!pressed\) return;\s+setMachinePower\(!relayConnected\);/,
 );
 assert.match(firmware, /#include <FastLED\.h>/);
 assert.match(firmware, /constexpr int BUTTON_LED_DATA_PIN = 4;/);
@@ -39,5 +39,11 @@ assert.match(
   firmware,
   /void refreshButtonLeds\(\) \{\s+if \(!relayConnected\) \{[\s\S]*CRGB::Black/,
 );
+assert.match(
+  firmware,
+  /void setMachinePower\(bool enabled\) \{[\s\S]*disableDrivers\(\);[\s\S]*setRelayConnected\(false\);[\s\S]*setRelayConnected\(true\);[\s\S]*armAtFoldedPose\(AxisMode::DUAL\);/,
+);
+assert.match(firmware, /command == "RELAY ON"\) return setMachinePower\(true\)/);
+assert.match(firmware, /command == "RELAY OFF"\) return setMachinePower\(false\)/);
 
 console.log("panel control tests: OK");

@@ -56,13 +56,19 @@ three times before declaring a feedback fault.
 Buttons are normally open to GND and pressed is LOW. GPIO36 and GPIO39 have no
 internal pull-ups and require the external 10 kΩ pull-ups used by the supplied
 button test. GPIO0 and GPIO2 use `INPUT_PULLUP`. Button 4 toggles the relay:
-GPIO15 HIGH connects it and LOW disconnects it.
+GPIO15 HIGH connects it and LOW disconnects it. At startup the relay and motor
+drivers are off. Turning button 4 ON requires the arm to be physically folded;
+the firmware then zeros the folded pose, calibrates both encoders, and enables
+the arms. Turning it OFF disables the arms before disconnecting the relay.
 
 The four indicators are WS2812 addressable LEDs on GPIO4, using GRB order and
 brightness 64. The physical strip runs in reverse panel order: Start/Stop uses
 pixel 1, Stabilization pixel 2, Repeat pixel 3, and Relay pixel 0. Red means off
 and green means on. When the relay/on-off button is OFF, all four pixels are
 completely black; turning it ON restores the normal red/green indicators.
+
+`CONTROL TEST ON` is intentionally different: button 4 only exercises the
+relay and LEDs, while the motor drivers remain disabled.
 
 ## Head Identification
 

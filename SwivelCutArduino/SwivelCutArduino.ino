@@ -402,6 +402,7 @@ void handleProductButtonChange(const ButtonInput &button);
 void printOperationReport(const char *label);
 void armAtFoldedPose(AxisMode mode);
 void refreshButtonLeds();
+void setMachinePower(bool enabled);
 
 const char *ledColorName(LedColor color) {
   switch (color) {
@@ -439,6 +440,38 @@ void setRelayConnected(bool connected, bool report = true) {
     Serial.print("=");
     Serial.println(connected ? "HIGH" : "LOW");
   }
+}
+
+void setMachinePower(bool enabled) {
+  if (!enabled) {
+    disableDrivers();
+    armMode = AxisMode::DUAL;
+    productReady = false;
+    productState = ProductState::IDLE;
+    productAbortRequested = false;
+    repeatCutActive = false;
+    if (bladeIsDown()) bladeRetracted();
+    setRelayConnected(false);
+    refreshButtonLeds();
+    Serial.println("MACHINE_OFF ARMS_DISABLED");
+    return;
+  }
+
+  Serial.println(
+      "MACHINE_ON: current arm pose must be physically folded; "
+      "homing and enabling arms");
+  setRelayConnected(true);
+  delay(100);
+  armAtFoldedPose(AxisMode::DUAL);
+  if (!armed || !productReady) {
+    disableDrivers();
+    setRelayConnected(false);
+    refreshButtonLeds();
+    Serial.println("MACHINE_ON_FAILED RELAY_OFF ARMS_DISABLED");
+    return;
+  }
+  refreshButtonLeds();
+  Serial.println("MACHINE_ON ARMS_HOMED_AND_ENABLED");
 }
 
 void refreshButtonLeds() {
@@ -2008,8 +2041,7 @@ void handleProductButtonChange(const ButtonInput &button) {
 
   if (button.number == 4) {
     if (!pressed) return;
-    setRelayConnected(!relayConnected);
-    refreshButtonLeds();
+    setMachinePower(!relayConnected);
     return;
   }
 
@@ -2083,7 +2115,8 @@ void printHelp() {
   Serial.println("  Start/Stop + cutter: press once to run the full cut");
   Serial.println("  Stabilization: toggle while idle");
   Serial.println("  Repeat: press once to run the full repeat");
-  Serial.println("  Relay (button 4): toggle GPIO15 HIGH/LOW");
+  Serial.println(
+      "  On/Off (button 4): relay ON homes/enables folded arms; OFF disables");
   Serial.println(
       "  WS2812 LEDs (GPIO4): red=off, green=on; one pixel per button");
   Serial.println("  Product buttons are ignored while motors are moving");
@@ -2159,8 +2192,8 @@ void handleCommand(String command) {
   if (command == "CONTROLS") return printControlStatus();
   if (command == "LEDS") return printLedStatus();
   if (command == "PINS") return printPanelPinMap();
-  if (command == "RELAY ON") return setRelayConnected(true);
-  if (command == "RELAY OFF") return setRelayConnected(false);
+  if (command == "RELAY ON") return setMachinePower(true);
+  if (command == "RELAY OFF") return setMachinePower(false);
   if (command == "RELAY STATUS") {
     Serial.println(relayConnected ? "RELAY CONNECTED" : "RELAY DISCONNECTED");
     return;
