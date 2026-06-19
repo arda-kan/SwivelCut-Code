@@ -46,6 +46,11 @@ assert.match(
 assert.match(firmware, /command == "RELAY ON"\) return setMachinePower\(true\)/);
 assert.match(firmware, /command == "RELAY OFF"\) return setMachinePower\(false\)/);
 assert.match(firmware, /constexpr float CUTTER_EXTRA_LENGTH_MM = 5\.0f;/);
+assert.match(firmware, /constexpr bool ASSUME_CUTTER_UNLESS_TRACER = false;/);
+assert.match(
+  firmware,
+  /if \(adc >= TRACING_HEAD_ADC_MIN && adc <= TRACING_HEAD_ADC_MAX\) \{[\s\S]*return HeadType::TRACING;[\s\S]*if \(ASSUME_CUTTER_UNLESS_TRACER\) return HeadType::CUTTING;/,
+);
 assert.match(firmware, /constexpr float CUTTER_LINK_2_MM = LINK_2_MM \+ CUTTER_EXTRA_LENGTH_MM;/);
 assert.match(firmware, /bool compensateTaughtPathForCutter\(\)/);
 assert.match(

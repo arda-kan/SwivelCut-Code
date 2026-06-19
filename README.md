@@ -86,6 +86,11 @@ The divider is:
 
 Five consistent readings are required before a head change is accepted.
 
+Set `ASSUME_CUTTER_UNLESS_TRACER` near the top of the firmware to `true` for
+the optional override mode. In that mode, readings inside the tracer ADC range
+remain `TRACER`, while cutter, disconnected, and unknown readings are all
+treated as `CUTTER`. It defaults to `false`, preserving normal detection.
+
 ## Firmware Workflow
 
 1. Fold the arm and send `ARM FOLDED`.

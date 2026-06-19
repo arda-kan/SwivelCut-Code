@@ -42,6 +42,9 @@ constexpr int CUTTING_HEAD_ADC_MAX = 1125;
 constexpr int TRACING_HEAD_ADC_MIN = 1500;
 constexpr int TRACING_HEAD_ADC_MAX = 2550;
 constexpr int HEAD_DISCONNECTED_ADC_MIN = 3500;
+// When true, only the tracer ADC range is detected explicitly. Every other
+// reading (cutter, disconnected, or unknown) is treated as the cutting head.
+constexpr bool ASSUME_CUTTER_UNLESS_TRACER = false;
 constexpr float PRODUCT_TEACH_HZ = 20.0f;
 constexpr float PRODUCT_TEACH_MAX_SECONDS = 60.0f;
 constexpr float PRODUCT_SMOOTHING_MS = 150.0f;
@@ -531,12 +534,13 @@ const char *headTypeName(HeadType type) {
 }
 
 HeadType classifyHeadAdc(int adc) {
+  if (adc >= TRACING_HEAD_ADC_MIN && adc <= TRACING_HEAD_ADC_MAX) {
+    return HeadType::TRACING;
+  }
+  if (ASSUME_CUTTER_UNLESS_TRACER) return HeadType::CUTTING;
   if (adc >= HEAD_DISCONNECTED_ADC_MIN) return HeadType::DISCONNECTED;
   if (adc >= CUTTING_HEAD_ADC_MIN && adc <= CUTTING_HEAD_ADC_MAX) {
     return HeadType::CUTTING;
-  }
-  if (adc >= TRACING_HEAD_ADC_MIN && adc <= TRACING_HEAD_ADC_MAX) {
-    return HeadType::TRACING;
   }
   return HeadType::UNKNOWN;
 }
@@ -2499,6 +2503,10 @@ void setup() {
   Serial.println("Fold the arm, then type ARM FOLDED");
   Serial.println("Product buttons become active after ARM FOLDED.");
   Serial.println("Type CONTROL TEST ON to test buttons, LEDs, relay, and head ID.");
+  if (ASSUME_CUTTER_UNLESS_TRACER) {
+    Serial.println(
+        "WARNING: head override active; every non-tracer reading is CUTTER");
+  }
   printPanelPinMap();
   refreshButtonLeds();
   printHelp();
