@@ -61,7 +61,8 @@ GPIO15 HIGH connects it and LOW disconnects it.
 The four indicators are WS2812 addressable LEDs on GPIO4, using GRB order and
 brightness 64. The physical strip runs in reverse panel order: Start/Stop uses
 pixel 1, Stabilization pixel 2, Repeat pixel 3, and Relay pixel 0. Red means off
-and green means on.
+and green means on. When the relay/on-off button is OFF, all four pixels are
+completely black; turning it ON restores the normal red/green indicators.
 
 ## Head Identification
 

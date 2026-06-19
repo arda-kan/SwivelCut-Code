@@ -35,5 +35,9 @@ assert.match(firmware, /command == "RELAY OFF"/);
 assert.doesNotMatch(firmware, /ARM_TOGGLE_BUTTON_PIN/);
 assert.doesNotMatch(firmware, /CONTROL_TEST_REPORT_MS/);
 assert.doesNotMatch(firmware, /nextControlTestReportMs/);
+assert.match(
+  firmware,
+  /void refreshButtonLeds\(\) \{\s+if \(!relayConnected\) \{[\s\S]*CRGB::Black/,
+);
 
 console.log("panel control tests: OK");

@@ -442,6 +442,19 @@ void setRelayConnected(bool connected, bool report = true) {
 }
 
 void refreshButtonLeds() {
+  if (!relayConnected) {
+    bool changed = false;
+    for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+      if (buttonLeds[i].color != LedColor::OFF) {
+        buttonLedPixels[buttonLeds[i].pixelIndex] = CRGB::Black;
+        buttonLeds[i].color = LedColor::OFF;
+        changed = true;
+      }
+    }
+    if (changed) FastLED.show();
+    return;
+  }
+
   bool on[BUTTON_COUNT] = {};
   if (controlTestEnabled) {
     for (size_t i = 0; i < BUTTON_COUNT; ++i) {
