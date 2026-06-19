@@ -19,10 +19,10 @@ constexpr float BLADE_DOWN_SECONDS = 0.75f;
 constexpr float BLADE_RETRACT_SECONDS = 0.75f;
 constexpr bool BLADE_REVERSE_TO_RETRACT = true;
 
-constexpr int START_STOP_BUTTON_PIN = 36;    // VP; external pull-up required.
-constexpr int STABILIZATION_BUTTON_PIN = 39; // VN; external pull-up required.
-constexpr int REPEAT_BUTTON_PIN = 0;
-constexpr int RELAY_BUTTON_PIN = 2;
+constexpr int START_STOP_BUTTON_PIN = 2;
+constexpr int STABILIZATION_BUTTON_PIN = 36; // VP; external pull-up required.
+constexpr int REPEAT_BUTTON_PIN = 39;        // VN; external pull-up required.
+constexpr int RELAY_BUTTON_PIN = 0;
 constexpr int RELAY_PIN = 15;
 constexpr uint8_t RELAY_CONNECTED_LEVEL = HIGH;
 constexpr uint8_t RELAY_DISCONNECTED_LEVEL = LOW;
@@ -326,10 +326,10 @@ static_assert(BUTTON_LED_COUNT == BUTTON_COUNT,
               "The WS2812 strip needs one pixel per button");
 
 ButtonLed buttonLeds[] = {
-    {0, 1, "START_STOP", LedColor::OFF},
-    {1, 2, "STABILIZATION", LedColor::OFF},
-    {2, 3, "REPEAT", LedColor::OFF},
-    {3, 4, "RELAY", LedColor::OFF},
+    {1, 1, "START_STOP", LedColor::OFF},
+    {2, 2, "STABILIZATION", LedColor::OFF},
+    {3, 3, "REPEAT", LedColor::OFF},
+    {0, 4, "RELAY", LedColor::OFF},
 };
 
 HeadType stableHeadType = HeadType::UNKNOWN;
@@ -2362,9 +2362,9 @@ void setup() {
   pinMode(ENA_PIN, OUTPUT);
   pinMode(BLADE_IN1_PIN, OUTPUT);
   pinMode(BLADE_IN2_PIN, OUTPUT);
-  pinMode(START_STOP_BUTTON_PIN, INPUT);
+  pinMode(START_STOP_BUTTON_PIN, INPUT_PULLUP);
   pinMode(STABILIZATION_BUTTON_PIN, INPUT);
-  pinMode(REPEAT_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(REPEAT_BUTTON_PIN, INPUT);
   pinMode(RELAY_BUTTON_PIN, INPUT_PULLUP);
   digitalWrite(RELAY_PIN, RELAY_DISCONNECTED_LEVEL);
   pinMode(RELAY_PIN, OUTPUT);

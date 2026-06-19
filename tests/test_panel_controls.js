@@ -7,10 +7,10 @@ const firmware = fs.readFileSync(
 );
 
 assert.match(firmware, /constexpr int RELAY_PIN = 15;/);
-assert.match(firmware, /constexpr int START_STOP_BUTTON_PIN = 36;/);
-assert.match(firmware, /constexpr int STABILIZATION_BUTTON_PIN = 39;/);
-assert.match(firmware, /constexpr int REPEAT_BUTTON_PIN = 0;/);
-assert.match(firmware, /constexpr int RELAY_BUTTON_PIN = 2;/);
+assert.match(firmware, /constexpr int START_STOP_BUTTON_PIN = 2;/);
+assert.match(firmware, /constexpr int STABILIZATION_BUTTON_PIN = 36;/);
+assert.match(firmware, /constexpr int REPEAT_BUTTON_PIN = 39;/);
+assert.match(firmware, /constexpr int RELAY_BUTTON_PIN = 0;/);
 assert.match(firmware, /constexpr uint8_t RELAY_CONNECTED_LEVEL = HIGH;/);
 assert.match(firmware, /constexpr uint8_t RELAY_DISCONNECTED_LEVEL = LOW;/);
 assert.match(
@@ -21,8 +21,13 @@ assert.match(firmware, /#include <FastLED\.h>/);
 assert.match(firmware, /constexpr int BUTTON_LED_DATA_PIN = 4;/);
 assert.match(firmware, /constexpr int BUTTON_LED_COUNT = 4;/);
 assert.match(firmware, /FastLED\.addLeds<WS2812, BUTTON_LED_DATA_PIN, GRB>/);
-assert.match(firmware, /pinMode\(START_STOP_BUTTON_PIN, INPUT\);/);
+assert.match(firmware, /pinMode\(START_STOP_BUTTON_PIN, INPUT_PULLUP\);/);
 assert.match(firmware, /pinMode\(STABILIZATION_BUTTON_PIN, INPUT\);/);
+assert.match(firmware, /pinMode\(REPEAT_BUTTON_PIN, INPUT\);/);
+assert.match(
+  firmware,
+  /ButtonLed buttonLeds\[\] = \{\s+\{1, 1, "START_STOP"[\s\S]*\{2, 2, "STABILIZATION"[\s\S]*\{3, 3, "REPEAT"[\s\S]*\{0, 4, "RELAY"/,
+);
 assert.match(firmware, /command == "LEDS"/);
 assert.match(firmware, /command == "PINS"/);
 assert.match(firmware, /command == "RELAY ON"/);

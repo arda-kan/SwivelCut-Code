@@ -41,10 +41,10 @@ Coordinates use positive X to the physical right and positive Y forward.
 | Blade H-bridge inputs | 13, 14 |
 | J1 AS5600 SDA, SCL | 18, 19 |
 | J2 AS5600 SDA, SCL | 16, 17 |
-| Start/Stop button (VP, external pull-up) | 36 |
-| Stabilization button (VN, external pull-up) | 39 |
-| Repeat button | 0 |
-| Relay toggle button | 2 |
+| Start/Stop button | 2 |
+| Stabilization button (VP, external pull-up) | 36 |
+| Repeat button (VN, external pull-up) | 39 |
+| Relay toggle button | 0 |
 | Relay control (HIGH = connected) | 15 |
 | Four WS2812 LED data | 4 |
 | Head-ID ADC | 34 |
@@ -59,8 +59,9 @@ button test. GPIO0 and GPIO2 use `INPUT_PULLUP`. Button 4 toggles the relay:
 GPIO15 HIGH connects it and LOW disconnects it.
 
 The four indicators are WS2812 addressable LEDs on GPIO4, using GRB order and
-brightness 64, matching the supplied FastLED sketch. Pixels 0–3 correspond to
-buttons 1–4. Red means off and green means on.
+brightness 64. The physical strip runs in reverse panel order: Start/Stop uses
+pixel 1, Stabilization pixel 2, Repeat pixel 3, and Relay pixel 0. Red means off
+and green means on.
 
 ## Head Identification
 
