@@ -21,7 +21,17 @@ constexpr bool BLADE_REVERSE_TO_RETRACT = true;
 constexpr int START_STOP_BUTTON_PIN = 5;
 constexpr int STABILIZATION_BUTTON_PIN = 22;
 constexpr int REPEAT_BUTTON_PIN = 23;
-constexpr int ARM_TOGGLE_BUTTON_PIN = 21;
+constexpr int RELAY_BUTTON_PIN = 21;
+constexpr int RELAY_PIN = 15;
+constexpr uint8_t RELAY_CONNECTED_LEVEL = HIGH;
+constexpr uint8_t RELAY_DISCONNECTED_LEVEL = LOW;
+
+// Set these eight values from the LED wiring sketch. A value of -1 leaves that
+// color output disabled, which prevents accidental GPIO conflicts while the
+// final panel wiring is being confirmed.
+constexpr int BUTTON_LED_RED_PINS[] = {-1, -1, -1, -1};
+constexpr int BUTTON_LED_GREEN_PINS[] = {-1, -1, -1, -1};
+constexpr bool BUTTON_LEDS_COMMON_ANODE = false;
 constexpr int HEAD_ID_PIN = 34;
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 35;
 constexpr unsigned long HEAD_SAMPLE_INTERVAL_MS = 20;
@@ -37,7 +47,7 @@ constexpr float PRODUCT_TEACH_HZ = 20.0f;
 constexpr float PRODUCT_TEACH_MAX_SECONDS = 60.0f;
 constexpr float PRODUCT_SMOOTHING_MS = 150.0f;
 constexpr float PRODUCT_MAX_DEVIATION_DEG = 1.0f;
-constexpr bool XY_SMOOTHING_IMPLEMENTED = false;
+constexpr bool XY_SMOOTHING_IMPLEMENTED = true;
 // false: settle at every taught point; true: stream the path continuously
 // and perform closed-loop settling only at the final point.
 constexpr bool CONTINUOUS_TRAJECTORY_REPLAY = true;
@@ -131,6 +141,20 @@ struct ButtonInput {
   int rawState;
   int stableState;
   unsigned long rawChangedMs;
+};
+
+enum class LedColor {
+  OFF,
+  RED,
+  GREEN,
+};
+
+struct ButtonLed {
+  int redPin;
+  int greenPin;
+  int number;
+  const char *name;
+  LedColor color;
 };
 
 enum class HeadType {
@@ -297,9 +321,28 @@ ButtonInput buttons[] = {
     {START_STOP_BUTTON_PIN, 1, "START_STOP", HIGH, HIGH, 0},
     {STABILIZATION_BUTTON_PIN, 2, "STABILIZATION", HIGH, HIGH, 0},
     {REPEAT_BUTTON_PIN, 3, "REPEAT", HIGH, HIGH, 0},
-    {ARM_TOGGLE_BUTTON_PIN, 4, "ARM_TOGGLE", HIGH, HIGH, 0},
+    {RELAY_BUTTON_PIN, 4, "RELAY", HIGH, HIGH, 0},
 };
 constexpr size_t BUTTON_COUNT = sizeof(buttons) / sizeof(buttons[0]);
+static_assert(
+    sizeof(BUTTON_LED_RED_PINS) / sizeof(BUTTON_LED_RED_PINS[0]) ==
+        BUTTON_COUNT,
+    "Each button needs one red LED pin entry");
+static_assert(
+    sizeof(BUTTON_LED_GREEN_PINS) / sizeof(BUTTON_LED_GREEN_PINS[0]) ==
+        BUTTON_COUNT,
+    "Each button needs one green LED pin entry");
+
+ButtonLed buttonLeds[] = {
+    {BUTTON_LED_RED_PINS[0], BUTTON_LED_GREEN_PINS[0], 1, "START_STOP",
+     LedColor::OFF},
+    {BUTTON_LED_RED_PINS[1], BUTTON_LED_GREEN_PINS[1], 2, "STABILIZATION",
+     LedColor::OFF},
+    {BUTTON_LED_RED_PINS[2], BUTTON_LED_GREEN_PINS[2], 3, "REPEAT",
+     LedColor::OFF},
+    {BUTTON_LED_RED_PINS[3], BUTTON_LED_GREEN_PINS[3], 4, "RELAY",
+     LedColor::OFF},
+};
 
 HeadType stableHeadType = HeadType::UNKNOWN;
 HeadType candidateHeadType = HeadType::UNKNOWN;
@@ -313,10 +356,13 @@ unsigned long nextControlTestReportMs = 0;
 bool testTeachingActive = false;
 bool testStabilizationEnabled = false;
 bool testHasLastCut = false;
+bool controlTestButtonOn[BUTTON_COUNT] = {};
 HeadType testActiveHead = HeadType::UNKNOWN;
 ProductState productState = ProductState::IDLE;
 bool productReady = false;
 bool stabilizationEnabled = false;
+bool relayConnected = false;
+bool repeatCutActive = false;
 BladePosition bladePosition = BladePosition::RETRACTED;
 bool productCutActive = false;
 bool productAbortRequested = false;
@@ -368,6 +414,78 @@ void serviceProductWorkflow();
 void handleProductButtonChange(const ButtonInput &button);
 void printOperationReport(const char *label);
 void armAtFoldedPose(AxisMode mode);
+void refreshButtonLeds();
+
+bool outputPinConfigured(int pin) {
+  return pin >= 0;
+}
+
+const char *ledColorName(LedColor color) {
+  switch (color) {
+    case LedColor::RED:
+      return "RED";
+    case LedColor::GREEN:
+      return "GREEN";
+    default:
+      return "OFF";
+  }
+}
+
+void writeButtonLed(ButtonLed &led, LedColor color) {
+  const uint8_t onLevel = BUTTON_LEDS_COMMON_ANODE ? LOW : HIGH;
+  const uint8_t offLevel = BUTTON_LEDS_COMMON_ANODE ? HIGH : LOW;
+  if (outputPinConfigured(led.redPin)) {
+    digitalWrite(led.redPin, color == LedColor::RED ? onLevel : offLevel);
+  }
+  if (outputPinConfigured(led.greenPin)) {
+    digitalWrite(led.greenPin, color == LedColor::GREEN ? onLevel : offLevel);
+  }
+  led.color = color;
+}
+
+void setRelayConnected(bool connected, bool report = true) {
+  relayConnected = connected;
+  if (controlTestEnabled) {
+    controlTestButtonOn[3] = connected;
+  }
+  digitalWrite(
+      RELAY_PIN,
+      connected ? RELAY_CONNECTED_LEVEL : RELAY_DISCONNECTED_LEVEL);
+  if (report) {
+    Serial.print("RELAY ");
+    Serial.print(connected ? "CONNECTED" : "DISCONNECTED");
+    Serial.print(" GPIO");
+    Serial.print(RELAY_PIN);
+    Serial.print("=");
+    Serial.println(connected ? "HIGH" : "LOW");
+  }
+}
+
+void refreshButtonLeds() {
+  bool on[BUTTON_COUNT] = {};
+  if (controlTestEnabled) {
+    for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+      on[i] = controlTestButtonOn[i];
+    }
+  } else if (stateTestEnabled) {
+    on[0] = testTeachingActive;
+    on[1] = testStabilizationEnabled;
+    on[2] = testHasLastCut;
+    on[3] = relayConnected;
+  } else {
+    on[0] = productState != ProductState::IDLE;
+    on[1] = stabilizationEnabled;
+    on[2] = repeatCutActive;
+    on[3] = relayConnected;
+  }
+
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    const LedColor requested = on[i] ? LedColor::GREEN : LedColor::RED;
+    if (buttonLeds[i].color != requested) {
+      writeButtonLed(buttonLeds[i], requested);
+    }
+  }
+}
 
 const char *headTypeName(HeadType type) {
   switch (type) {
@@ -404,6 +522,17 @@ void printButtonEvent(const ButtonInput &button) {
   Serial.println(")");
   if (button.stableState != LOW) return;
 
+  const size_t index = static_cast<size_t>(button.number - 1);
+  controlTestButtonOn[index] = !controlTestButtonOn[index];
+  if (button.number == 4) {
+    setRelayConnected(controlTestButtonOn[index]);
+  }
+  refreshButtonLeds();
+  Serial.print("LED ");
+  Serial.print(button.number);
+  Serial.print(" ");
+  Serial.println(ledColorName(buttonLeds[index].color));
+
   Serial.print("TEST ONLY - ");
   if (button.number == 1) {
     testTeachingActive = !testTeachingActive;
@@ -420,7 +549,8 @@ void printButtonEvent(const ButtonInput &button) {
   } else if (button.number == 3) {
     Serial.println("REPEAT REQUESTED; NO FUNCTION STARTED");
   } else if (button.number == 4) {
-    Serial.println("ARM TOGGLE REQUESTED; NO FUNCTION STARTED");
+    Serial.println(
+        relayConnected ? "RELAY CONNECTED" : "RELAY DISCONNECTED");
   }
 }
 
@@ -476,8 +606,9 @@ void printStateTestEvent(const ButtonInput &button) {
       Serial.println("REPEATING_LAST_CUT_EVENT");
     }
   } else if (button.number == 4) {
-    Serial.println("ARM_TOGGLE_TEST_ONLY");
+    setRelayConnected(!relayConnected);
   }
+  refreshButtonLeds();
 }
 
 void printControlStatus() {
@@ -489,8 +620,30 @@ void printControlStatus() {
     Serial.print(buttons[i].name);
     Serial.print("=");
     Serial.print(buttons[i].stableState == LOW ? "PRESSED" : "RELEASED");
+    Serial.print("(GPIO");
+    Serial.print(buttons[i].pin);
+    Serial.print("=");
+    Serial.print(buttons[i].stableState == HIGH ? "HIGH" : "LOW");
+    Serial.print(")");
   }
-  Serial.print(" POWER_SWITCH=HARDWARE_ONLY");
+  Serial.print(" RELAY=");
+  Serial.print(relayConnected ? "CONNECTED" : "DISCONNECTED");
+  Serial.print("(GPIO");
+  Serial.print(RELAY_PIN);
+  Serial.print("=");
+  Serial.print(digitalRead(RELAY_PIN) == HIGH ? "HIGH" : "LOW");
+  Serial.print(")");
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    Serial.print(" LED");
+    Serial.print(buttonLeds[i].number);
+    Serial.print("=");
+    Serial.print(ledColorName(buttonLeds[i].color));
+    Serial.print("(R");
+    Serial.print(buttonLeds[i].redPin);
+    Serial.print(",G");
+    Serial.print(buttonLeds[i].greenPin);
+    Serial.print(")");
+  }
   latestHeadAdc = analogRead(HEAD_ID_PIN);
   const HeadType measuredHead = classifyHeadAdc(latestHeadAdc);
   Serial.print(" HEAD=");
@@ -500,8 +653,45 @@ void printControlStatus() {
   Serial.println(latestHeadAdc);
 }
 
+void printLedStatus() {
+  Serial.print("LEDS");
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    Serial.print(" LED");
+    Serial.print(buttonLeds[i].number);
+    Serial.print("_");
+    Serial.print(buttonLeds[i].name);
+    Serial.print("=");
+    Serial.print(ledColorName(buttonLeds[i].color));
+    Serial.print(" R_GPIO=");
+    Serial.print(buttonLeds[i].redPin);
+    Serial.print(" G_GPIO=");
+    Serial.print(buttonLeds[i].greenPin);
+  }
+  Serial.println();
+}
+
+void printPanelPinMap() {
+  Serial.println("PANEL PIN MAP (edit constants near the top to rewire):");
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    Serial.print("  B");
+    Serial.print(buttons[i].number);
+    Serial.print(" ");
+    Serial.print(buttons[i].name);
+    Serial.print(" button=GPIO");
+    Serial.print(buttons[i].pin);
+    Serial.print(" pressed=LOW red=GPIO");
+    Serial.print(buttonLeds[i].redPin);
+    Serial.print(" green=GPIO");
+    Serial.println(buttonLeds[i].greenPin);
+  }
+  Serial.print("  Relay=GPIO");
+  Serial.print(RELAY_PIN);
+  Serial.println(" connected=HIGH disconnected=LOW");
+}
+
 void serviceControlInputs() {
   const unsigned long now = millis();
+  refreshButtonLeds();
   for (size_t i = 0; i < BUTTON_COUNT; ++i) {
     ButtonInput &button = buttons[i];
     const int raw = digitalRead(button.pin);
@@ -520,6 +710,7 @@ void serviceControlInputs() {
           handleProductButtonChange(button);
         }
       }
+      refreshButtonLeds();
     }
   }
 
@@ -574,6 +765,7 @@ void setControlTest(bool enabled) {
   controlTestEnabled = enabled;
   stateTestEnabled = false;
   if (!enabled) {
+    refreshButtonLeds();
     Serial.println("CONTROL TEST OFF");
     return;
   }
@@ -592,11 +784,16 @@ void setControlTest(bool enabled) {
   headTypeInitialized = false;
   testTeachingActive = false;
   testStabilizationEnabled = false;
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    controlTestButtonOn[i] = false;
+  }
+  controlTestButtonOn[3] = relayConnected;
   nextHeadSampleMs = 0;
   nextControlTestReportMs = now;
   Serial.println(
       "CONTROL TEST ON: motors and blade outputs disabled; "
-      "press buttons or change head");
+      "buttons toggle their LED and button 4 also toggles the relay");
+  refreshButtonLeds();
   printControlStatus();
 }
 
@@ -604,6 +801,7 @@ void setStateTest(bool enabled) {
   stateTestEnabled = enabled;
   controlTestEnabled = false;
   if (!enabled) {
+    refreshButtonLeds();
     Serial.println("STATE_TEST_OFF");
     return;
   }
@@ -625,6 +823,7 @@ void setStateTest(bool enabled) {
   testHasLastCut = false;
   testActiveHead = HeadType::UNKNOWN;
   nextHeadSampleMs = 0;
+  refreshButtonLeds();
   Serial.println("NOT_DOING_ANYTHING");
 }
 
@@ -1686,14 +1885,18 @@ void runProductCut(bool repeat) {
       stabilizationEnabled ? PRODUCT_MAX_DEVIATION_DEG : 0.0f);
   taughtJ1Only = false;
   productState = ProductState::CUTTING;
+  repeatCutActive = repeat;
   productCutActive = true;
   productAbortRequested = false;
+  refreshButtonLeds();
   Serial.print(repeat ? "REPEATING_LAST_CUT" : "CUTTING_STARTED");
   Serial.println(
       stabilizationEnabled ? "_WITH_STABILIZATION" : "");
   const bool completed = replayTeach(true);
   productCutActive = false;
   productState = ProductState::IDLE;
+  repeatCutActive = false;
+  refreshButtonLeds();
   disableDrivers();
   if (bladeIsDown()) bladeRetracted();
   if (completed) {
@@ -1814,22 +2017,8 @@ void handleProductButtonChange(const ButtonInput &button) {
 
   if (button.number == 4) {
     if (!pressed) return;
-    if (motorsMoving || productState != ProductState::IDLE) {
-      Serial.println("ARM_TOGGLE_IGNORED_ACTIVE_OPERATION");
-      return;
-    }
-    if (armed || productReady) {
-      disableDrivers();
-      armMode = AxisMode::DUAL;
-      productReady = false;
-      productState = ProductState::IDLE;
-      if (bladeIsDown()) bladeRetracted();
-      Serial.println("DISARMED_BY_BUTTON");
-      printOperationReport("DISARMED");
-    } else {
-      Serial.println("ARM_BUTTON: current pose must be physically folded");
-      armAtFoldedPose(AxisMode::DUAL);
-    }
+    setRelayConnected(!relayConnected);
+    refreshButtonLeds();
     return;
   }
 
@@ -1903,7 +2092,8 @@ void printHelp() {
   Serial.println("  Start/Stop + cutter: press once to run the full cut");
   Serial.println("  Stabilization: toggle while idle");
   Serial.println("  Repeat: press once to run the full repeat");
-  Serial.println("  Arm toggle (GPIO21): folded arm / disarm while idle");
+  Serial.println("  Relay (button 4): toggle GPIO15 HIGH/LOW");
+  Serial.println("  LEDs: red=off, green=on; CONTROL TEST toggles each LED");
   Serial.println("  Product buttons are ignored while motors are moving");
   Serial.println("Commands:");
   Serial.println("  ARM FOLDED | ARM J1 | ARM J2 | DISARM");
@@ -1916,7 +2106,8 @@ void printHelp() {
   Serial.println("  ENC | TEACH [J1] <seconds> [Hz] [smooth_ms] [max_dev]");
   Serial.println("  STREAM ON | STREAM OFF | STREAM RATE <1-50 Hz>");
   Serial.println("  FEEDBACK ON | FEEDBACK OFF | FEEDBACK STATUS");
-  Serial.println("  CONTROLS | CONTROL TEST ON/OFF | STATE TEST ON/OFF");
+  Serial.println("  CONTROLS | LEDS | PINS | RELAY ON/OFF/STATUS");
+  Serial.println("  CONTROL TEST ON/OFF | STATE TEST ON/OFF");
   Serial.println("  PLAY | CLEAR | POS | HELP");
   Serial.println("  BLADE RETRACTED | BLADE DOWN");
 }
@@ -1974,6 +2165,14 @@ void handleCommand(String command) {
     return;
   }
   if (command == "CONTROLS") return printControlStatus();
+  if (command == "LEDS") return printLedStatus();
+  if (command == "PINS") return printPanelPinMap();
+  if (command == "RELAY ON") return setRelayConnected(true);
+  if (command == "RELAY OFF") return setRelayConnected(false);
+  if (command == "RELAY STATUS") {
+    Serial.println(relayConnected ? "RELAY CONNECTED" : "RELAY DISCONNECTED");
+    return;
+  }
   if (command == "HELP") return printHelp();
   if (controlTestEnabled || stateTestEnabled) {
     Serial.println(
@@ -2187,7 +2386,20 @@ void setup() {
   pinMode(START_STOP_BUTTON_PIN, INPUT_PULLUP);
   pinMode(STABILIZATION_BUTTON_PIN, INPUT_PULLUP);
   pinMode(REPEAT_BUTTON_PIN, INPUT_PULLUP);
-  pinMode(ARM_TOGGLE_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(RELAY_BUTTON_PIN, INPUT_PULLUP);
+  digitalWrite(RELAY_PIN, RELAY_DISCONNECTED_LEVEL);
+  pinMode(RELAY_PIN, OUTPUT);
+  const uint8_t ledOffLevel = BUTTON_LEDS_COMMON_ANODE ? HIGH : LOW;
+  for (size_t i = 0; i < BUTTON_COUNT; ++i) {
+    if (outputPinConfigured(buttonLeds[i].redPin)) {
+      digitalWrite(buttonLeds[i].redPin, ledOffLevel);
+      pinMode(buttonLeds[i].redPin, OUTPUT);
+    }
+    if (outputPinConfigured(buttonLeds[i].greenPin)) {
+      digitalWrite(buttonLeds[i].greenPin, ledOffLevel);
+      pinMode(buttonLeds[i].greenPin, OUTPUT);
+    }
+  }
   pinMode(HEAD_ID_PIN, INPUT);
   analogReadResolution(12);
   analogSetPinAttenuation(HEAD_ID_PIN, ADC_11db);
@@ -2219,7 +2431,14 @@ void setup() {
   Serial.println("SwivelCut Arduino controller ready");
   Serial.println("Fold the arm, then type ARM FOLDED");
   Serial.println("Product buttons become active after ARM FOLDED.");
-  Serial.println("Type CONTROL TEST ON to test buttons and head ID.");
+  Serial.println("Type CONTROL TEST ON to test buttons, LEDs, relay, and head ID.");
+  printPanelPinMap();
+  if (!outputPinConfigured(buttonLeds[0].redPin)) {
+    Serial.println(
+        "WARNING: LED GPIOs are -1 because the uploaded LED example was "
+        "identical to the firmware; set BUTTON_LED_*_PINS before LED testing.");
+  }
+  refreshButtonLeds();
   printHelp();
 }
 

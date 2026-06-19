@@ -44,7 +44,8 @@ Coordinates use positive X to the physical right and positive Y forward.
 | Start/Stop button | 5 |
 | Stabilization button | 22 |
 | Repeat button | 23 |
-| Arm/Disarm toggle button | 21 |
+| Relay toggle button | 21 |
+| Relay control (HIGH = connected) | 15 |
 | Head-ID ADC | 34 |
 
 Each AS5600 uses address `0x36` on its own ESP32 I2C controller. Power both
@@ -52,6 +53,14 @@ encoder modules from 3.3 V. The buses run at 100 kHz and retry transient reads
 three times before declaring a feedback fault.
 
 Buttons are normally open to GND and use `INPUT_PULLUP`. Pressed is LOW.
+Button 4 toggles the relay: GPIO15 HIGH connects it and LOW disconnects it.
+
+The four red/green button LEDs are configured through
+`BUTTON_LED_RED_PINS` and `BUTTON_LED_GREEN_PINS` at the top of the firmware.
+They currently default to `-1` (disabled) because the uploaded LED example was
+an identical copy of the firmware and did not contain the LED GPIO map. Set the
+eight entries to the panel wiring before testing. Set
+`BUTTON_LEDS_COMMON_ANODE` to match the LED electrical arrangement.
 
 ## Head Identification
 
@@ -114,8 +123,19 @@ CONTROL TEST ON
 CONTROL TEST OFF
 STATE TEST ON
 STATE TEST OFF
+CONTROLS
+LEDS
+PINS
+RELAY ON
+RELAY OFF
+RELAY STATUS
 HELP
 ```
+
+`CONTROL TEST ON` disables the motors and blade, prints debounced button
+press/release levels, toggles the corresponding red/green LED on every press,
+and allows button 4 to exercise the relay. `CONTROLS`, `LEDS`, and `PINS`
+provide one-shot serial wiring reports.
 
 When `XY` omits `UP` or `DOWN`, the firmware automatically prefers `UP` for
 positive X and `DOWN` for negative X, then tries the other branch if the
@@ -161,10 +181,11 @@ maximum pulse rate, and ordinary point-move speed.
 
 ## Stabilization
 
-Joint-space smoothing remains the default. Optional XY smoothing can be enabled
-with `XY_SMOOTHING_IMPLEMENTED`. Its deviation clamp is scaled per point using
-the point's actual reach, with a 20 mm minimum radius, and it retries reduced
-time windows if a smoothed point cannot be converted through IK.
+XY smoothing is enabled by default with `XY_SMOOTHING_IMPLEMENTED`. Its
+deviation clamp is scaled per point using the point's actual reach, with a
+20 mm minimum radius, and it retries reduced time windows if a smoothed point
+cannot be converted through IK. Set `XY_SMOOTHING_IMPLEMENTED` to `false` to
+return to joint-space angle smoothing.
 
 ## Build
 
