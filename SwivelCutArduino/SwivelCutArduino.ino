@@ -58,6 +58,11 @@ constexpr bool CONTINUOUS_TRAJECTORY_REPLAY = true;
 constexpr float REPLAY_STEP_RATE_HZ = 120.0f;
 constexpr float REPLAY_MAX_ACCEL_STEPS_PER_S2 = 60.0f;
 constexpr long CONTINUOUS_FEEDBACK_STEP_INTERVAL = 256;
+// Temporary investigation mode. Enable to compare commanded/measured joints
+// and XY, correction iterations, approach directions, and encoder calibration.
+// Serial logging can disturb timing, so leave false for normal operation.
+constexpr bool MOTION_DIAGNOSTICS = false;
+constexpr int MOTION_DIAGNOSTIC_POINT_INTERVAL = 50;
 
 constexpr int FULL_STEPS_PER_REV = 200;
 constexpr int MICROSTEP = 4;  // TB6600 DIP switches must also be set to 1/4.
@@ -392,6 +397,8 @@ bool stepperTimersReady = false;
 bool motionSegmentActive = false;
 unsigned long motionSegmentStartedUs = 0;
 unsigned long motionSegmentDurationUs = 0;
+int lastCommandDirectionJ1 = 0;
+int lastCommandDirectionJ2 = 0;
 
 long atomicReadSteps(volatile long &steps) {
   return __atomic_load_n(&steps, __ATOMIC_ACQUIRE);
@@ -428,6 +435,12 @@ void stopMotionSegment();
 void serviceProductWorkflow();
 void handleProductButtonChange(const ButtonInput &button);
 void printOperationReport(const char *label);
+void forwardKinematics(
+    float j1Deg, float j2Deg, float &x, float &y);
+void printMotionDiagnostic(
+    const char *stage, int correction,
+    float targetJ1, float targetJ2,
+    float measuredJ1, float measuredJ2);
 void armAtFoldedPose(AxisMode mode, bool enableAfterCalibration = true);
 void refreshButtonLeds();
 void setMachinePower(bool enabled);
@@ -1059,6 +1072,8 @@ bool startSegment(
   const unsigned long durationUs =
       max(requestedDurationUs, minimumDurationUs);
 
+  if (deltaJ1 != 0) lastCommandDirectionJ1 = deltaJ1 > 0 ? 1 : -1;
+  if (deltaJ2 != 0) lastCommandDirectionJ2 = deltaJ2 > 0 ? 1 : -1;
   setDirection(J1_DIR_PIN, deltaJ1, INVERT_J1);
   setDirection(J2_DIR_PIN, deltaJ2, INVERT_J2);
   delayMicroseconds(DIR_SETUP_US);
@@ -1170,6 +1185,11 @@ bool checkFeedback() {
   const float errorJ1 = measuredJ1 - currentJ1Deg();
   const float errorJ2 =
       shortestJointDelta(measuredJ2, currentJ2Deg());
+  if (MOTION_DIAGNOSTICS) {
+    printMotionDiagnostic(
+        "FEEDBACK", -1, currentJ1Deg(), currentJ2Deg(),
+        measuredJ1, measuredJ2);
+  }
   if ((armMode != AxisMode::J2_ONLY &&
        fabsf(errorJ1) > FEEDBACK_MAX_ERROR_DEG) ||
       (armMode != AxisMode::J1_ONLY &&
@@ -1278,6 +1298,11 @@ bool moveToAngles(
     }
     const float errorJ1 = j1Deg - measuredJ1;
     const float errorJ2 = shortestJointDelta(j2Deg, measuredJ2);
+    if (MOTION_DIAGNOSTICS) {
+      printMotionDiagnostic(
+          "CORRECTION", correction, j1Deg, j2Deg,
+          measuredJ1, measuredJ2);
+    }
     const bool j1Settled =
         armMode == AxisMode::J2_ONLY ||
         fabsf(errorJ1) <= FEEDBACK_TOLERANCE_DEG;
@@ -1315,6 +1340,52 @@ void forwardKinematicsForLink2(
 
 void forwardKinematics(float j1Deg, float j2Deg, float &x, float &y) {
   forwardKinematicsForLink2(j1Deg, j2Deg, LINK_2_MM, x, y);
+}
+
+void printMotionDiagnostic(
+    const char *stage, int correction,
+    float targetJ1, float targetJ2,
+    float measuredJ1, float measuredJ2) {
+  float targetX = 0.0f;
+  float targetY = 0.0f;
+  float measuredX = 0.0f;
+  float measuredY = 0.0f;
+  forwardKinematics(targetJ1, targetJ2, targetX, targetY);
+  forwardKinematics(measuredJ1, measuredJ2, measuredX, measuredY);
+  Serial.print("MOTION_DIAG stage=");
+  Serial.print(stage);
+  if (correction >= 0) {
+    Serial.print(" correction=");
+    Serial.print(correction);
+  }
+  Serial.print(" dir_J1=");
+  Serial.print(lastCommandDirectionJ1);
+  Serial.print(" dir_J2=");
+  Serial.print(lastCommandDirectionJ2);
+  Serial.print(" target_J1=");
+  Serial.print(targetJ1, 3);
+  Serial.print(" target_J2=");
+  Serial.print(targetJ2, 3);
+  Serial.print(" measured_J1=");
+  Serial.print(measuredJ1, 3);
+  Serial.print(" measured_J2=");
+  Serial.print(measuredJ2, 3);
+  Serial.print(" error_J1=");
+  Serial.print(targetJ1 - measuredJ1, 3);
+  Serial.print(" error_J2=");
+  Serial.print(shortestJointDelta(targetJ2, measuredJ2), 3);
+  Serial.print(" target_X=");
+  Serial.print(targetX, 2);
+  Serial.print(" target_Y=");
+  Serial.print(targetY, 2);
+  Serial.print(" measured_X=");
+  Serial.print(measuredX, 2);
+  Serial.print(" measured_Y=");
+  Serial.print(measuredY, 2);
+  Serial.print(" error_X=");
+  Serial.print(targetX - measuredX, 2);
+  Serial.print(" error_Y=");
+  Serial.println(targetY - measuredY, 2);
 }
 
 void printOperationReport(const char *label) {
@@ -1391,8 +1462,15 @@ bool inverseKinematics(float x, float y, bool elbowDown,
 }
 
 bool compensateTaughtPathForCutter() {
-  if (fabsf(CUTTER_EXTRA_LENGTH_MM) < 0.0001f) return true;
+  if (fabsf(CUTTER_EXTRA_LENGTH_MM) < 0.0001f) {
+    if (MOTION_DIAGNOSTICS) {
+      Serial.println(
+          "MOTION_DIAG cutter_compensation=DISABLED offset_mm=0");
+    }
+    return true;
+  }
 
+  bool previousElbowDown = taught[0].j2Deg < 0.0f;
   for (int i = 0; i < taughtCount; ++i) {
     float tracedX = 0.0f;
     float tracedY = 0.0f;
@@ -1412,6 +1490,24 @@ bool compensateTaughtPathForCutter() {
       Serial.println(tracedY, 2);
       return false;
     }
+    if (MOTION_DIAGNOSTICS &&
+        (i % MOTION_DIAGNOSTIC_POINT_INTERVAL == 0 ||
+         elbowDown != previousElbowDown ||
+         i == taughtCount - 1)) {
+      Serial.print("MOTION_DIAG cutter_point=");
+      Serial.print(i);
+      Serial.print(" traced_X=");
+      Serial.print(tracedX, 2);
+      Serial.print(" traced_Y=");
+      Serial.print(tracedY, 2);
+      Serial.print(" elbow=");
+      Serial.print(elbowDown ? "DOWN" : "UP");
+      Serial.print(" cutter_J1=");
+      Serial.print(cutterJ1, 3);
+      Serial.print(" cutter_J2=");
+      Serial.println(cutterJ2, 3);
+    }
+    previousElbowDown = elbowDown;
     taught[i].j1Deg = cutterJ1;
     taught[i].j2Deg = cutterJ2;
   }
@@ -2434,6 +2530,26 @@ void armAtFoldedPose(AxisMode mode, bool enableAfterCalibration) {
       return;
     }
     encodersCalibrated = true;
+    if (MOTION_DIAGNOSTICS) {
+      int16_t rawJ1 = 0;
+      int16_t rawJ2 = 0;
+      const bool raw1Ok =
+          mode == AxisMode::J2_ONLY || j1Encoder.rawValue(rawJ1);
+      const bool raw2Ok =
+          mode == AxisMode::J1_ONLY || j2Encoder.rawValue(rawJ2);
+      Serial.print("CALIBRATION_DIAG raw_J1=");
+      if (raw1Ok) {
+        Serial.print(rawJ1);
+      } else {
+        Serial.print("READ_ERROR");
+      }
+      Serial.print(" raw_J2=");
+      if (raw2Ok) {
+        Serial.println(rawJ2);
+      } else {
+        Serial.println("READ_ERROR");
+      }
+    }
   } else if (mode != AxisMode::DUAL) {
     Serial.println("ERROR: single-axis ARM requires an encoder branch");
     return;
@@ -2737,6 +2853,10 @@ void setup() {
   if (ALLOW_TAUGHT_PATH_OUTSIDE_SOFTWARE_LIMITS) {
     Serial.println(
         "WARNING: encoder-taught paths may replay outside software limits");
+  }
+  if (MOTION_DIAGNOSTICS) {
+    Serial.println(
+        "WARNING: MOTION_DIAGNOSTICS active; serial output may affect timing");
   }
   if (ASSUME_CUTTER_UNLESS_TRACER) {
     Serial.println(

@@ -142,6 +142,14 @@ motor drivers release. It includes the final target J1/J2, measured encoder
 J1/J2, and signed endpoint errors. J2 error uses circular-angle comparison
 across the folded `+180°/-180°` boundary.
 
+For one-sided offset investigation, set `MOTION_DIAGNOSTICS` to `true`.
+`MOTION_DIAG` lines then report target/measured J1/J2 and XY, signed errors,
+correction iteration, and latest commanded direction. Calibration prints
+`CALIBRATION_DIAG` raw encoder values for comparing folded-pose repeatability.
+If cutter-length compensation is active, sampled points also report the chosen
+elbow branch and solved cutter angles. The default is `false` because heavy
+serial output can affect motion timing.
+
 ## Attachment Length Compensation
 
 `CUTTER_EXTRA_LENGTH_MM` near the top of the firmware defaults to `0.0`. It is
