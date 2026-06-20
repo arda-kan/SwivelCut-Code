@@ -2,6 +2,7 @@
 #include <FastLED.h>
 #include <Wire.h>
 #include <driver/gpio.h>
+#include <esp_arduino_version.h>
 #include <math.h>
 
 // SwivelCut firmware for an ESP32 and two TB6600 stepper drivers.
@@ -13,11 +14,17 @@ constexpr int J1_DIR_PIN = 26;
 constexpr int J2_PUL_PIN = 32;
 constexpr int J2_DIR_PIN = 33;
 constexpr int ENA_PIN = 27;
-constexpr int BLADE_IN1_PIN = 13;
-constexpr int BLADE_IN2_PIN = 14;
+// Blade motor controller: GPIO13 is PWM/speed and GPIO14 is direction.
+constexpr int BLADE_PWM_PIN = 13;
+constexpr int BLADE_DIR_PIN = 14;
+constexpr int BLADE_PWM_CHANNEL = 0;
+constexpr int BLADE_PWM_FREQUENCY_HZ = 1000;
+constexpr int BLADE_PWM_RESOLUTION_BITS = 8;
+constexpr uint8_t BLADE_PWM_DUTY = 200;
+constexpr uint8_t BLADE_DOWN_DIRECTION = HIGH;
+constexpr uint8_t BLADE_RETRACT_DIRECTION = LOW;
 constexpr float BLADE_DOWN_SECONDS = 0.75f;
 constexpr float BLADE_RETRACT_SECONDS = 0.75f;
-constexpr bool BLADE_REVERSE_TO_RETRACT = true;
 
 constexpr int START_STOP_BUTTON_PIN = 2;
 constexpr int STABILIZATION_BUTTON_PIN = 36; // VP; external pull-up required.
@@ -444,6 +451,7 @@ void printMotionDiagnostic(
 void armAtFoldedPose(AxisMode mode, bool enableAfterCalibration = true);
 void refreshButtonLeds();
 void setMachinePower(bool enabled);
+void stopBlade();
 bool bladeIsDown();
 void bladeRetracted(bool force = false);
 
@@ -845,8 +853,7 @@ void setControlTest(bool enabled) {
   }
 
   disableDrivers();
-  digitalWrite(BLADE_IN1_PIN, LOW);
-  digitalWrite(BLADE_IN2_PIN, LOW);
+  stopBlade();
   encoderStreamEnabled = false;
   const unsigned long now = millis();
   for (size_t i = 0; i < BUTTON_COUNT; ++i) {
@@ -880,8 +887,7 @@ void setStateTest(bool enabled) {
   }
 
   disableDrivers();
-  digitalWrite(BLADE_IN1_PIN, LOW);
-  digitalWrite(BLADE_IN2_PIN, LOW);
+  stopBlade();
   encoderStreamEnabled = false;
   const unsigned long now = millis();
   for (size_t i = 0; i < BUTTON_COUNT; ++i) {
@@ -901,8 +907,11 @@ void setStateTest(bool enabled) {
 }
 
 void stopBlade() {
-  digitalWrite(BLADE_IN1_PIN, LOW);
-  digitalWrite(BLADE_IN2_PIN, LOW);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcWrite(BLADE_PWM_PIN, 0);
+#else
+  ledcWrite(BLADE_PWM_CHANNEL, 0);
+#endif
 }
 
 bool bladeIsDown() {
@@ -913,9 +922,17 @@ unsigned long bladeDriveMs(float seconds) {
   return static_cast<unsigned long>(seconds * 1000.0f);
 }
 
-void driveBlade(uint8_t in1, uint8_t in2, float seconds) {
-  digitalWrite(BLADE_IN1_PIN, in1);
-  digitalWrite(BLADE_IN2_PIN, in2);
+void setBladePwm(uint8_t duty) {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcWrite(BLADE_PWM_PIN, duty);
+#else
+  ledcWrite(BLADE_PWM_CHANNEL, duty);
+#endif
+}
+
+void driveBlade(uint8_t direction, float seconds) {
+  digitalWrite(BLADE_DIR_PIN, direction);
+  setBladePwm(BLADE_PWM_DUTY);
   delay(bladeDriveMs(seconds));
   stopBlade();
 }
@@ -923,18 +940,14 @@ void driveBlade(uint8_t in1, uint8_t in2, float seconds) {
 void bladeDown(bool force = false) {
   if (!force && bladePosition == BladePosition::DOWN) return;
   Serial.println("BLADE_DOWN");
-  driveBlade(HIGH, LOW, BLADE_DOWN_SECONDS);
+  driveBlade(BLADE_DOWN_DIRECTION, BLADE_DOWN_SECONDS);
   bladePosition = BladePosition::DOWN;
 }
 
 void bladeRetracted(bool force) {
   if (!force && bladePosition == BladePosition::RETRACTED) return;
   Serial.println("BLADE_RETRACTED");
-  if (BLADE_REVERSE_TO_RETRACT) {
-    driveBlade(LOW, HIGH, BLADE_RETRACT_SECONDS);
-  } else {
-    driveBlade(HIGH, LOW, BLADE_RETRACT_SECONDS);
-  }
+  driveBlade(BLADE_RETRACT_DIRECTION, BLADE_RETRACT_SECONDS);
   bladePosition = BladePosition::RETRACTED;
 }
 
@@ -2805,8 +2818,17 @@ void setup() {
   pinMode(J2_PUL_PIN, OUTPUT);
   pinMode(J2_DIR_PIN, OUTPUT);
   pinMode(ENA_PIN, OUTPUT);
-  pinMode(BLADE_IN1_PIN, OUTPUT);
-  pinMode(BLADE_IN2_PIN, OUTPUT);
+  pinMode(BLADE_DIR_PIN, OUTPUT);
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  ledcAttach(
+      BLADE_PWM_PIN, BLADE_PWM_FREQUENCY_HZ,
+      BLADE_PWM_RESOLUTION_BITS);
+#else
+  ledcSetup(
+      BLADE_PWM_CHANNEL, BLADE_PWM_FREQUENCY_HZ,
+      BLADE_PWM_RESOLUTION_BITS);
+  ledcAttachPin(BLADE_PWM_PIN, BLADE_PWM_CHANNEL);
+#endif
   pinMode(START_STOP_BUTTON_PIN, INPUT_PULLUP);
   pinMode(STABILIZATION_BUTTON_PIN, INPUT);
   pinMode(REPEAT_BUTTON_PIN, INPUT);
@@ -2825,8 +2847,8 @@ void setup() {
   digitalWrite(J2_PUL_PIN, STEP_IDLE);
   digitalWrite(J1_DIR_PIN, LOW);
   digitalWrite(J2_DIR_PIN, LOW);
-  digitalWrite(BLADE_IN1_PIN, LOW);
-  digitalWrite(BLADE_IN2_PIN, LOW);
+  digitalWrite(BLADE_DIR_PIN, BLADE_RETRACT_DIRECTION);
+  stopBlade();
   disableDrivers();
 
   Serial.begin(115200);

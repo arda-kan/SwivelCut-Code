@@ -46,7 +46,8 @@ the shortest circular difference across this boundary, so adjacent samples at
 | J2 STEP | 32 |
 | J2 DIR | 33 |
 | Shared driver enable | 27 |
-| Blade H-bridge inputs | 13, 14 |
+| Blade motor PWM | 13 |
+| Blade motor direction | 14 |
 | J1 AS5600 SDA, SCL | 18, 19 |
 | J2 AS5600 SDA, SCL | 16, 17 |
 | Start/Stop button | 2 |
@@ -213,11 +214,13 @@ After `LOAD POINTS <N>`, send exactly N lines containing:
 
 Use `swivelcut_visualizer.html` to generate this package from an SVG.
 
-The blade actuator exposes only two serial commands: `BLADE RETRACTED` and
-`BLADE DOWN`. Both commands drive the actuator for the timed duration configured
-near the top of the firmware. Cut operations force the blade retracted before
-moving to the start point, drive it down for the cutting pass, and retract it
-again on completion or stop.
+The blade actuator uses the same PWM + direction logic as the standalone motor
+test: GPIO13 is 1 kHz, 8-bit PWM at duty 200, and GPIO14 selects direction.
+Direction HIGH lowers the blade and LOW retracts it; PWM duty 0 stops it. The
+serial commands are `BLADE RETRACTED` and `BLADE DOWN`, using independently
+tunable timed durations near the top of the firmware. Cut operations force the
+blade retracted before moving to the start point, lower it for the cutting
+pass, and retract it again on completion or stop.
 
 ## Replay Mode
 
@@ -262,6 +265,7 @@ board. The current configuration compiles without PSRAM and uses approximately
 ## Safety
 
 Test with the blade removed first. The blade actuator is timed open-loop and
-does not have position feedback. Tune `BLADE_DOWN_SECONDS` and
-`BLADE_RETRACT_SECONDS` on the machine before cutting material. Limit switches
-or equivalent blade-position feedback are recommended before production use.
+does not have position feedback. Tune `BLADE_PWM_DUTY`,
+`BLADE_DOWN_SECONDS`, and `BLADE_RETRACT_SECONDS` on the machine before
+cutting material. Limit switches or equivalent blade-position feedback are
+recommended before production use.
