@@ -57,5 +57,11 @@ assert.match(
   firmware,
   /prepareTaughtPath\([\s\S]*if \(!compensateTaughtPathForCutter\(\)\) return;/,
 );
+assert.match(firmware, /void runTracerReplay\(\)/);
+assert.match(firmware, /const bool completed = replayTeach\(false\);/);
+assert.match(
+  firmware,
+  /stableHeadType == HeadType::TRACING\) \{\s+runTracerReplay\(\);[\s\S]*stableHeadType == HeadType::CUTTING\) \{\s+runProductCut\(true\);/,
+);
 
 console.log("panel control tests: OK");

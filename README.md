@@ -99,7 +99,9 @@ treated as `CUTTER`. It defaults to `false`, preserving normal detection.
 4. Install the cutter head.
 5. Optionally toggle Stabilization while idle.
 6. Press Start/Stop once to run the complete cut.
-7. Press Repeat to repeat the last completed cut.
+7. With the cutter attached, press Repeat to repeat the last completed cut.
+   With the tracer attached, press Repeat to replay and draw over the recorded
+   trace without operating the blade.
 
 Head removal during teaching discards the incomplete trace. A confirmed cutter
 head removal during a cut aborts motion and retracts the blade. Product buttons
@@ -107,6 +109,11 @@ are ignored whenever the motors are moving, including cuts and repeats;
 Stabilization can only change while the machine is idle and stationary.
 After a successful cut, Start/Stop will not run the same trace again; teach a
 new movement or use Repeat for another pass.
+
+Repeat is head-sensitive. A cutter requires a previously completed cut and
+performs the normal blade cycle. A tracer only requires a recorded path and
+replays it without cutter-length compensation or blade movement. Stabilization
+is applied to either replay when enabled.
 
 The firmware prints a `REPORT` after operations with software J1/J2, XY,
 encoder J1/J2, and raw encoder counts.

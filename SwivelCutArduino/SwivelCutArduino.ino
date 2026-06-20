@@ -361,6 +361,7 @@ BladePosition bladePosition = BladePosition::RETRACTED;
 bool productCutActive = false;
 bool productAbortRequested = false;
 bool productHasLastCut = false;
+bool tracerReplayActive = false;
 bool motorsMoving = false;
 unsigned long productTeachStartedMs = 0;
 unsigned long nextProductTeachSampleMs = 0;
@@ -459,6 +460,7 @@ void setMachinePower(bool enabled) {
     productState = ProductState::IDLE;
     productAbortRequested = false;
     repeatCutActive = false;
+    tracerReplayActive = false;
     if (bladeIsDown()) bladeRetracted();
     setRelayConnected(false);
     refreshButtonLeds();
@@ -787,9 +789,13 @@ void serviceControlInputs() {
         printOperationReport("TRACING_STOPPED_HEAD_CHANGED");
       }
       if (productState == ProductState::CUTTING &&
-          stableHeadType != HeadType::CUTTING) {
+          stableHeadType !=
+              (tracerReplayActive ? HeadType::TRACING : HeadType::CUTTING)) {
         productAbortRequested = true;
-        Serial.println("CUT_ABORT_REQUESTED_HEAD_CHANGED");
+        Serial.println(
+            tracerReplayActive
+                ? "TRACER_REPLAY_ABORT_REQUESTED_HEAD_CHANGED"
+                : "CUT_ABORT_REQUESTED_HEAD_CHANGED");
       }
     }
   }
@@ -1989,6 +1995,48 @@ void runProductCut(bool repeat) {
           : (repeat ? "REPEAT_STOPPED" : "CUT_STOPPED"));
 }
 
+void runTracerReplay() {
+  if (!productReady || !encodersCalibrated ||
+      encoderMode != AxisMode::DUAL) {
+    Serial.println("ERROR_PRODUCT_NOT_READY_USE_ARM_FOLDED");
+    return;
+  }
+  if (!headTypeInitialized || stableHeadType != HeadType::TRACING) {
+    Serial.println("ERROR_TRACER_HEAD_REQUIRED");
+    return;
+  }
+  if (taughtCount < 2) {
+    Serial.println("ERROR_NO_TRACED_PATH");
+    return;
+  }
+
+  prepareTaughtPath(
+      stabilizationEnabled ? PRODUCT_SMOOTHING_MS : 0.0f,
+      stabilizationEnabled ? PRODUCT_MAX_DEVIATION_DEG : 0.0f);
+  taughtJ1Only = false;
+  productState = ProductState::CUTTING;
+  tracerReplayActive = true;
+  repeatCutActive = true;
+  productCutActive = true;
+  productAbortRequested = false;
+  refreshButtonLeds();
+  Serial.println(
+      stabilizationEnabled
+          ? "TRACER_REPLAY_STARTED_WITH_STABILIZATION"
+          : "TRACER_REPLAY_STARTED");
+  const bool completed = replayTeach(false);
+  productCutActive = false;
+  tracerReplayActive = false;
+  productState = ProductState::IDLE;
+  repeatCutActive = false;
+  refreshButtonLeds();
+  disableDrivers();
+  Serial.println(
+      completed ? "TRACER_REPLAY_COMPLETE" : "TRACER_REPLAY_STOPPED");
+  printOperationReport(
+      completed ? "TRACER_REPLAY_COMPLETE" : "TRACER_REPLAY_STOPPED");
+}
+
 void loadPointsFromSerial(long requestedCount) {
   if (requestedCount <= 1 || requestedCount > MAX_TEACH_POINTS) {
     Serial.print("ERROR: LOAD POINTS count out of range (1-");
@@ -2133,7 +2181,13 @@ void handleProductButtonChange(const ButtonInput &button) {
       Serial.println("REPEAT_IGNORED_ACTIVE_OPERATION");
       return;
     }
-    runProductCut(true);
+    if (headTypeInitialized && stableHeadType == HeadType::TRACING) {
+      runTracerReplay();
+    } else if (headTypeInitialized && stableHeadType == HeadType::CUTTING) {
+      runProductCut(true);
+    } else {
+      Serial.println("ERROR_RECOGNIZED_HEAD_REQUIRED");
+    }
   }
 }
 
@@ -2168,7 +2222,8 @@ void printHelp() {
   Serial.println("  Start/Stop + tracer: press to start/stop recording");
   Serial.println("  Start/Stop + cutter: press once to run the full cut");
   Serial.println("  Stabilization: toggle while idle");
-  Serial.println("  Repeat: press once to run the full repeat");
+  Serial.println(
+      "  Repeat + cutter: repeat last cut; + tracer: redraw traced path");
   Serial.println(
       "  On/Off (button 4): relay ON homes/enables folded arms; OFF disables");
   Serial.println(
