@@ -29,6 +29,9 @@ Both HTML tools are self-contained and can be opened directly in a browser.
   `J1=90, J2=0` is `X=-400, Y=0`
 
 Coordinates use positive X to the physical right and positive Y forward.
+Because the folded J2 pose is equivalently `+180°` or `-180°`, encoder readings
+that continue above `+180°` are wrapped into the negative branch. For example,
+an encoder-derived `196°` becomes `-164°`.
 
 ## ESP32 Pins
 

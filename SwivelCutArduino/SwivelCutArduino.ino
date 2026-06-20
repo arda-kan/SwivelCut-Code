@@ -403,6 +403,12 @@ float currentJ2Deg() {
   return atomicReadSteps(j2PositionSteps) / J2_STEPS_PER_DEG;
 }
 
+float normalizeJointDegrees(float degreesValue) {
+  while (degreesValue > 180.0f) degreesValue -= 360.0f;
+  while (degreesValue < -180.0f) degreesValue += 360.0f;
+  return degreesValue;
+}
+
 void disableDrivers();
 void stopMotionSegment();
 void serviceProductWorkflow();
@@ -1092,7 +1098,12 @@ bool encoderJointAngles(float &j1Deg, float &j2Deg) {
   }
   float motor2Deg = 0.0f;
   if (!j2Encoder.angleDegrees(motor2Deg)) return false;
-  j2Deg = 180.0f + motor2Deg / J2_GEAR_RATIO;
+  // The folded pose is both +180 and -180. If the manually moved arm opens
+  // through the negative branch, the continuous encoder can read above +180
+  // (for example 196 degrees). Canonicalize that to the equivalent -164
+  // degrees so valid traces are not rejected at the folded boundary.
+  j2Deg = normalizeJointDegrees(
+      180.0f + motor2Deg / J2_GEAR_RATIO);
   return true;
 }
 

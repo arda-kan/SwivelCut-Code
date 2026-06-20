@@ -12,5 +12,10 @@ const firmware = fs.readFileSync(
 assert.match(firmware, /constexpr bool INVERT_J1 = false;/);
 assert.match(firmware, /constexpr bool INVERT_J2 = true;/);
 assert.match(firmware, /constexpr int ENCODER_J2_SIGN = 1;/);
+assert.match(firmware, /float normalizeJointDegrees\(float degreesValue\)/);
+assert.match(
+  firmware,
+  /j2Deg = normalizeJointDegrees\(\s*180\.0f \+ motor2Deg \/ J2_GEAR_RATIO\);/,
+);
 
 console.log("motor/encoder direction tests: OK");
