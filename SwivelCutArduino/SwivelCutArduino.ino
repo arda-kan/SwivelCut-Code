@@ -71,6 +71,9 @@ constexpr float J1_MIN_DEG = -90.0f;
 constexpr float J1_MAX_DEG = 90.0f;
 constexpr float J2_MIN_DEG = -180.0f;
 constexpr float J2_MAX_DEG = 180.0f;
+// When true, encoder-taught paths may be recorded and replayed outside the
+// normal joint limits. Direct J1/J2/ANGLES/XY/CUT commands remain limited.
+constexpr bool ALLOW_TAUGHT_PATH_OUTSIDE_SOFTWARE_LIMITS = false;
 constexpr bool INVERT_J1 = false;
 constexpr bool INVERT_J2 = true;
 
@@ -1232,7 +1235,9 @@ bool angleInRange(float j1Deg, float j2Deg) {
          j2Deg >= J2_MIN_DEG && j2Deg <= J2_MAX_DEG;
 }
 
-bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
+bool moveToAngles(
+    float j1Deg, float j2Deg, bool report = true,
+    bool allowOutsideLimits = false) {
   if (!armed) {
     Serial.println("ERROR: type ARM FOLDED first");
     return false;
@@ -1247,7 +1252,7 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
     Serial.println("ERROR: ARM J2 mode blocks J1 motion");
     return false;
   }
-  if (!angleInRange(j1Deg, j2Deg)) {
+  if (!allowOutsideLimits && !angleInRange(j1Deg, j2Deg)) {
     Serial.println("ERROR: angle outside software limits");
     return false;
   }
@@ -1827,8 +1832,17 @@ bool replayTeach(bool operateBlade = false) {
   Serial.print(measuredJ2, 2);
   Serial.print(" -> ");
   Serial.println(taught[0].j2Deg, 2);
+  const bool allowOutsideLimits =
+      ALLOW_TAUGHT_PATH_OUTSIDE_SOFTWARE_LIMITS;
+  if (allowOutsideLimits) {
+    Serial.println(
+        "WARNING: taught-path software joint limits are bypassed; "
+        "feedback and encoder-jump protection remain active");
+  }
   if (operateBlade) bladeRetracted(true);
-  if (!moveToAngles(taught[0].j1Deg, taught[0].j2Deg, false)) {
+  if (!moveToAngles(
+          taught[0].j1Deg, taught[0].j2Deg, false,
+          allowOutsideLimits)) {
     disableDrivers();
     if (operateBlade && bladeIsDown()) bladeRetracted();
     return false;
@@ -1839,12 +1853,15 @@ bool replayTeach(bool operateBlade = false) {
   if (CONTINUOUS_TRAJECTORY_REPLAY) {
     if (!executeContinuousTrajectory(stoppedPoint) ||
         !moveToAngles(taught[taughtCount - 1].j1Deg,
-                      taught[taughtCount - 1].j2Deg, false)) {
+                      taught[taughtCount - 1].j2Deg, false,
+                      allowOutsideLimits)) {
       if (stoppedPoint < 0) stoppedPoint = taughtCount - 1;
     }
   } else {
     for (int i = 1; i < taughtCount; ++i) {
-      if (!moveToAngles(taught[i].j1Deg, taught[i].j2Deg, false)) {
+      if (!moveToAngles(
+              taught[i].j1Deg, taught[i].j2Deg, false,
+              allowOutsideLimits)) {
         stoppedPoint = i;
         break;
       }
@@ -1881,7 +1898,8 @@ bool validateRawTeachPath(bool j1Only) {
         j1Only ||
         (rawTaught[i].j2Deg >= J2_MIN_DEG - TEACH_LIMIT_NOISE_MARGIN_DEG &&
          rawTaught[i].j2Deg <= J2_MAX_DEG + TEACH_LIMIT_NOISE_MARGIN_DEG);
-    if (!j1NearRange || !j2NearRange) {
+    if (!ALLOW_TAUGHT_PATH_OUTSIDE_SOFTWARE_LIMITS &&
+        (!j1NearRange || !j2NearRange)) {
       Serial.print("TEACH_REJECTED_OUT_OF_RANGE POINT=");
       Serial.print(i);
       Serial.print(" J1=");
@@ -1891,11 +1909,13 @@ bool validateRawTeachPath(bool j1Only) {
       taughtCount = 0;
       return false;
     }
-    rawTaught[i].j1Deg =
-        constrain(rawTaught[i].j1Deg, J1_MIN_DEG, J1_MAX_DEG);
-    if (!j1Only) {
-      rawTaught[i].j2Deg =
-          constrain(rawTaught[i].j2Deg, J2_MIN_DEG, J2_MAX_DEG);
+    if (!ALLOW_TAUGHT_PATH_OUTSIDE_SOFTWARE_LIMITS) {
+      rawTaught[i].j1Deg =
+          constrain(rawTaught[i].j1Deg, J1_MIN_DEG, J1_MAX_DEG);
+      if (!j1Only) {
+        rawTaught[i].j2Deg =
+            constrain(rawTaught[i].j2Deg, J2_MIN_DEG, J2_MAX_DEG);
+      }
     }
   }
 
@@ -1914,6 +1934,11 @@ bool validateRawTeachPath(bool j1Only) {
       taughtCount = 0;
       return false;
     }
+  }
+  if (ALLOW_TAUGHT_PATH_OUTSIDE_SOFTWARE_LIMITS) {
+    Serial.println(
+        "TEACH_LIMIT_BYPASS_ACTIVE: recorded path retained outside "
+        "software joint limits");
   }
   return true;
 }
@@ -2664,6 +2689,10 @@ void setup() {
   Serial.println("Fold the arm, then type ARM FOLDED");
   Serial.println("Product buttons become active after ARM FOLDED.");
   Serial.println("Type CONTROL TEST ON to test buttons, LEDs, relay, and head ID.");
+  if (ALLOW_TAUGHT_PATH_OUTSIDE_SOFTWARE_LIMITS) {
+    Serial.println(
+        "WARNING: encoder-taught paths may replay outside software limits");
+  }
   if (ASSUME_CUTTER_UNLESS_TRACER) {
     Serial.println(
         "WARNING: head override active; every non-tracer reading is CUTTER");

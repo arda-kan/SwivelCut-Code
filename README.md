@@ -131,6 +131,12 @@ avoiding an unwanted drawing stroke while returning to the first point.
 The firmware prints a `REPORT` after operations with software J1/J2, XY,
 encoder J1/J2, and raw encoder counts.
 
+`ALLOW_TAUGHT_PATH_OUTSIDE_SOFTWARE_LIMITS` defaults to `false`. When changed
+to `true`, encoder-taught paths can be retained and replayed beyond the normal
+J1/J2 software limits. Direct `J1`, `J2`, `ANGLES`, `XY`, and `CUT` commands
+remain limit-checked. Encoder-jump rejection, feedback faults, and operation
+abort logic remain enabled.
+
 Every completed or stopped replay also prints `REPLAY_ENDPOINT` before the
 motor drivers release. It includes the final target J1/J2, measured encoder
 J1/J2, and signed endpoint errors. J2 error uses circular-angle comparison
