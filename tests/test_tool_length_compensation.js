@@ -1,8 +1,8 @@
 const assert = require("assert");
 
-const L1 = 200;
-const tracerL2 = 200;
-const cutterL2 = 205;
+const L1 = 260;
+const tracerL2 = 255;
+const cutterL2 = 260;
 
 function forward(j1Deg, j2Deg, l2) {
   const t1 = j1Deg * Math.PI / 180;

@@ -60,8 +60,8 @@ constexpr int FULL_STEPS_PER_REV = 200;
 constexpr int MICROSTEP = 4;  // TB6600 DIP switches must also be set to 1/4.
 constexpr float J1_GEAR_RATIO = 6.0f;
 constexpr float J2_GEAR_RATIO = 9.0f;
-constexpr float LINK_1_MM = 200.0f;
-constexpr float LINK_2_MM = 200.0f;
+constexpr float LINK_1_MM = 260.0f;
+constexpr float LINK_2_MM = 255.0f;
 // Positive when the cutter tip extends farther from J2 than the tracer tip.
 // Set this to the measured attachment difference.
 constexpr float CUTTER_EXTRA_LENGTH_MM = 0.0f;

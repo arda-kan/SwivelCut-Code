@@ -39,39 +39,39 @@ const sandbox = {
 vm.createContext(sandbox);
 
 const tests = `
-assert.strictEqual(LINK_1_MM, 200);
-assert.strictEqual(LINK_2_MM, 200);
+assert.strictEqual(LINK_1_MM, 260);
+assert.strictEqual(LINK_2_MM, 255);
 assert.strictEqual(MAX_TEACH_POINTS, 3000);
 
 let straight = forwardKinematics(0, 0);
 assert.ok(Math.abs(straight.x) < 1e-9);
-assert.ok(Math.abs(straight.y - 400) < 1e-9);
+assert.ok(Math.abs(straight.y - 515) < 1e-9);
 let folded = forwardKinematics(0, 180);
 assert.ok(Math.abs(folded.x) < 1e-9);
-assert.ok(Math.abs(folded.y) < 1e-9);
+assert.ok(Math.abs(folded.y - 5) < 1e-9);
 
-let up = inverseKinematics(200, 200, false);
+let up = inverseKinematics(200, 300, false);
 assert.ok(up);
-assert.ok(Math.abs(up.j1Deg) < 1e-9);
-assert.ok(Math.abs(up.j2Deg - 90) < 1e-9);
-let down = inverseKinematics(200, 200, true);
+assert.ok(Math.abs(up.j1Deg - 11.309719562629716) < 1e-9);
+assert.ok(Math.abs(up.j2Deg - 91.1343231266257) < 1e-9);
+let down = inverseKinematics(200, 300, true);
 assert.ok(down);
-assert.ok(Math.abs(down.j1Deg + 90) < 1e-9);
-assert.ok(Math.abs(down.j2Deg + 90) < 1e-9);
-let left = inverseKinematics(-200, 200, true);
+assert.ok(Math.abs(down.j1Deg + 78.6898546145893) < 1e-9);
+assert.ok(Math.abs(down.j2Deg + 91.1343231266257) < 1e-9);
+let left = inverseKinematics(-250, 250, true);
 assert.ok(left);
-assert.ok(Math.abs(left.j1Deg) < 1e-9);
-assert.ok(Math.abs(left.j2Deg + 90) < 1e-9);
-let rightExtended = inverseKinematics(400, 0, false);
+assert.ok(Math.abs(left.j1Deg + 1.0590593750496704) < 1e-9);
+assert.ok(Math.abs(left.j2Deg + 93.29654184462534) < 1e-9);
+let rightExtended = inverseKinematics(515, 0, false);
 assert.ok(rightExtended);
 assert.ok(Math.abs(rightExtended.j1Deg + 90) < 1e-9);
 assert.ok(Math.abs(rightExtended.j2Deg) < 1e-9);
-let leftExtended = inverseKinematics(-400, 0, false);
+let leftExtended = inverseKinematics(-515, 0, false);
 assert.ok(leftExtended);
 assert.ok(Math.abs(leftExtended.j1Deg - 90) < 1e-9);
 assert.ok(Math.abs(leftExtended.j2Deg) < 1e-9);
 
-let far = inverseKinematicsDetailed(401, 0, false);
+let far = inverseKinematicsDetailed(516, 0, false);
 assert.strictEqual(far.ok, false);
 assert.strictEqual(far.type, "annulus");
 assert.ok(far.reason.includes("too far"));
@@ -108,7 +108,7 @@ assert.strictEqual(flat[2].sequenceIndex, 1);
 
 let validation = validatePoints([
   {x:200,y:200,sequenceIndex:0,pointIndex:0},
-  {x:0,y:400,sequenceIndex:0,pointIndex:1}
+  {x:0,y:515,sequenceIndex:0,pointIndex:1}
 ], false);
 assert.strictEqual(validation.allReachable, true);
 let output = generateLoadPointsPackage(validation);
@@ -117,7 +117,7 @@ assert.strictEqual(output.split("\\n").length, 3);
 
 let invalid = validatePoints([
   {x:200,y:200,sequenceIndex:0,pointIndex:0},
-  {x:401,y:0,sequenceIndex:0,pointIndex:1}
+  {x:516,y:0,sequenceIndex:0,pointIndex:1}
 ], false);
 assert.strictEqual(invalid.allReachable, false);
 assert.strictEqual(invalid.firstFailure.index, 1);

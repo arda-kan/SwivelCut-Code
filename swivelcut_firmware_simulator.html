@@ -158,9 +158,9 @@
           <div class="hint">Positive X right, positive Y forward</div>
         </div>
         <div class="arm-wrap">
-          <svg id="armSvg" viewBox="-450 -450 900 900" aria-label="Two-link robot arm">
+          <svg id="armSvg" viewBox="-600 -600 1200 1200" aria-label="Two-link robot arm">
             <g id="world" transform="scale(1,-1)">
-              <circle id="workspaceOuter" class="workspace" cx="0" cy="0" r="400"></circle>
+              <circle id="workspaceOuter" class="workspace" cx="0" cy="0" r="515"></circle>
               <circle id="workspaceInner" class="workspace" cx="0" cy="0" r="0"></circle>
               <g id="grid"></g>
               <line class="axis-line" x1="-440" y1="0" x2="440" y2="0"></line>
@@ -241,8 +241,8 @@ const DEFAULTS = Object.freeze({
   MICROSTEP: 4,
   J1_GEAR_RATIO: 6.0,
   J2_GEAR_RATIO: 9.0,
-  LINK_1_MM: 200.0,
-  LINK_2_MM: 200.0,
+  LINK_1_MM: 260.0,
+  LINK_2_MM: 255.0,
   J1_MIN_DEG: -90.0,
   J1_MAX_DEG: 90.0,
   J2_MIN_DEG: -180.0,
@@ -1051,7 +1051,7 @@ function startEncoderStream() {
 function renderGrid() {
   const grid = $("grid");
   let markup = "";
-  for (let value = -400; value <= 400; value += 100) {
+  for (let value = -600; value <= 600; value += 100) {
     if (value === 0) continue;
     markup += `<line class="grid-line" x1="${value}" y1="-440" x2="${value}" y2="440"></line>`;
     markup += `<line class="grid-line" x1="-440" y1="${value}" x2="440" y2="${value}"></line>`;

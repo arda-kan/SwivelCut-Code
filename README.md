@@ -16,7 +16,7 @@ Both HTML tools are self-contained and can be opened directly in a browser.
 
 ## Machine Configuration
 
-- Link lengths: 200 mm + 200 mm
+- Link lengths: 260 mm + 255 mm
 - J1 gear ratio: 6:1
 - J2 gear ratio: 9:1
 - Motors: 200 full steps/revolution
@@ -25,8 +25,10 @@ Both HTML tools are self-contained and can be opened directly in a browser.
 - J1 limits: -90 to +90 degrees
 - J2 limits: -180 to +180 degrees
 - Motor direction: J1 normal, J2 inverted
-- Arm coordinates: `J1=-90, J2=0` is `X=400, Y=0`;
-  `J1=90, J2=0` is `X=-400, Y=0`
+- Maximum reach: 515 mm
+- Folded radius: 5 mm
+- Arm coordinates: `J1=-90, J2=0` is `X=515, Y=0`;
+  `J1=90, J2=0` is `X=-515, Y=0`
 
 Coordinates use positive X to the physical right and positive Y forward.
 Because the folded J2 pose is equivalently `+180°` or `-180°`, encoder readings
