@@ -17,5 +17,11 @@ assert.ok(firmware.includes("__atomic_add_fetch("));
 assert.ok(!firmware.includes("pulseSelectedAxes("));
 assert.ok(!firmware.includes("waitForContinuousDeadline("));
 assert.ok(!firmware.includes("STEP_HALF_PERIOD_US"));
+assert.ok(firmware.includes("constexpr float REPLAY_STEP_RATE_HZ = 120.0f;"));
+assert.ok(firmware.includes("constexpr float REPLAY_MAX_ACCEL_STEPS_PER_S2 = 60.0f;"));
+assert.ok(firmware.includes("replaySegmentDurationUs("));
+assert.ok(firmware.includes("trajectoryDirectionReversesAfter("));
+assert.ok(firmware.includes("PLAY MODE: CONSTANT_PACE RATE_HZ="));
+assert.ok(!firmware.includes("continuousTrajectoryTimeScale("));
 
 console.log("interrupt stepper core tests: OK");

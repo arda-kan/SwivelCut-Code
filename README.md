@@ -214,12 +214,14 @@ again on completion or stop.
 ## Replay Mode
 
 `CONTINUOUS_TRAJECTORY_REPLAY` near the top of the firmware selects the replay
-executor. Its default `true` value paces the taught samples as one continuous
-step stream, with periodic safety feedback checks and closed-loop settling only
-at the final point. Set it to `false` to restore point-by-point motion and
-feedback settling. The continuous executor automatically slows the full
-trajectory when a recorded segment requests more steps than the configured
-pulse timing permits.
+executor. Its default `true` value replays taught samples as one continuous step
+stream, but does not copy the operator's drawing timestamps. Instead,
+`REPLAY_STEP_RATE_HZ` sets a repeatable normal pace and
+`REPLAY_MAX_ACCEL_STEPS_PER_S2` limits acceleration and deceleration. Defaults
+are 120 steps/s and 60 steps/s². The replay slows to rest at direction-reversing
+corners and the final endpoint, retains periodic feedback checks, and performs
+closed-loop settling at the endpoint. Set `CONTINUOUS_TRAJECTORY_REPLAY` to
+`false` to restore point-by-point motion.
 
 ## Stepper Timing
 
@@ -232,7 +234,8 @@ encoder streaming, feedback checks, and cut aborts continue to be serviced.
 The implementation targets the Arduino-ESP32 3.x `timerBegin(frequency)` API.
 `STEPPER_TIMER_HZ`, `STEPPER_MIN_HALF_PERIOD_US`, and
 `DEFAULT_STEP_RATE_HZ` near the top of the sketch control timer resolution,
-maximum pulse rate, and ordinary point-move speed.
+maximum pulse rate, and ordinary point-move speed. Replay pace and acceleration
+are controlled separately by the two `REPLAY_*` constants.
 
 ## Stabilization
 

@@ -53,7 +53,10 @@ constexpr bool XY_SMOOTHING_IMPLEMENTED = true;
 // false: settle at every taught point; true: stream the path continuously
 // and perform closed-loop settling only at the final point.
 constexpr bool CONTINUOUS_TRAJECTORY_REPLAY = true;
-constexpr float CONTINUOUS_TIMING_MARGIN = 1.05f;
+// Replay ignores hand-drawing timestamps and uses this repeatable motor pace.
+// Lower either value for gentler, more accurate motion.
+constexpr float REPLAY_STEP_RATE_HZ = 120.0f;
+constexpr float REPLAY_MAX_ACCEL_STEPS_PER_S2 = 60.0f;
 constexpr long CONTINUOUS_FEEDBACK_STEP_INTERVAL = 256;
 
 constexpr int FULL_STEPS_PER_REV = 200;
@@ -1694,37 +1697,83 @@ bool serviceContinuousTrajectory() {
   return true;
 }
 
-float continuousTrajectoryTimeScale() {
-  float timeScale = 1.0f;
-  for (int i = 1; i < taughtCount; ++i) {
-    float durationSeconds = taught[i].seconds - taught[i - 1].seconds;
-    if (durationSeconds <= 0.0f) {
-      durationSeconds = 1.0f / PRODUCT_TEACH_HZ;
-    }
-    const long previousJ1 =
-        lroundf(taught[i - 1].j1Deg * J1_STEPS_PER_DEG);
-    const long targetJ1 = lroundf(taught[i].j1Deg * J1_STEPS_PER_DEG);
-    const long j2StepDelta = lroundf(
-        shortestJointDelta(taught[i].j2Deg, taught[i - 1].j2Deg) *
-        J2_STEPS_PER_DEG);
-    const long stepEvents =
-        max(labs(targetJ1 - previousJ1), labs(j2StepDelta));
-    const float minimumSeconds =
-        stepEvents * STEPPER_MIN_STEP_PERIOD_US / 1000000.0f;
-    timeScale = max(
-        timeScale,
-        minimumSeconds * CONTINUOUS_TIMING_MARGIN / durationSeconds);
+long trajectorySegmentStepEvents(int pointIndex) {
+  if (pointIndex <= 0 || pointIndex >= taughtCount) return 0;
+  const long deltaJ1 = lroundf(
+      (taught[pointIndex].j1Deg - taught[pointIndex - 1].j1Deg) *
+      J1_STEPS_PER_DEG);
+  const long deltaJ2 = lroundf(
+      shortestJointDelta(
+          taught[pointIndex].j2Deg,
+          taught[pointIndex - 1].j2Deg) *
+      J2_STEPS_PER_DEG);
+  return max(labs(deltaJ1), labs(deltaJ2));
+}
+
+bool trajectoryDirectionReversesAfter(int pointIndex) {
+  if (pointIndex <= 0 || pointIndex >= taughtCount - 1) return false;
+  const float currentJ1 =
+      taught[pointIndex].j1Deg - taught[pointIndex - 1].j1Deg;
+  const float nextJ1 =
+      taught[pointIndex + 1].j1Deg - taught[pointIndex].j1Deg;
+  const float currentJ2 = shortestJointDelta(
+      taught[pointIndex].j2Deg, taught[pointIndex - 1].j2Deg);
+  const float nextJ2 = shortestJointDelta(
+      taught[pointIndex + 1].j2Deg, taught[pointIndex].j2Deg);
+  return (currentJ1 * nextJ1 < 0.0f) ||
+         (currentJ2 * nextJ2 < 0.0f);
+}
+
+unsigned long replaySegmentDurationUs(
+    int pointIndex, long remainingSteps, float &entryRateHz) {
+  const long stepEvents = trajectorySegmentStepEvents(pointIndex);
+  if (stepEvents <= 0) {
+    return static_cast<unsigned long>(1000000.0f / PRODUCT_TEACH_HZ);
   }
-  return timeScale;
+
+  const float acceleration = max(REPLAY_MAX_ACCEL_STEPS_PER_S2, 1.0f);
+  const float reachableExitRate = sqrtf(
+      entryRateHz * entryRateHz +
+      2.0f * acceleration * stepEvents);
+  const float stoppingExitRate = sqrtf(
+      2.0f * acceleration * max(remainingSteps, 0L));
+  float exitRateHz = min(
+      REPLAY_STEP_RATE_HZ,
+      min(reachableExitRate, stoppingExitRate));
+  if (trajectoryDirectionReversesAfter(pointIndex) ||
+      pointIndex == taughtCount - 1) {
+    exitRateHz = 0.0f;
+  }
+
+  float durationSeconds = 0.0f;
+  const float rateSum = entryRateHz + exitRateHz;
+  if (rateSum > 0.001f) {
+    durationSeconds = 2.0f * stepEvents / rateSum;
+  } else {
+    // A single segment starting and ending at rest uses a triangular profile.
+    durationSeconds =
+        2.0f * sqrtf(stepEvents / acceleration);
+  }
+  entryRateHz = exitRateHz;
+  return max(
+      static_cast<unsigned long>(ceilf(durationSeconds * 1000000.0f)),
+      static_cast<unsigned long>(stepEvents) *
+          STEPPER_MIN_STEP_PERIOD_US);
 }
 
 bool executeContinuousTrajectory(int &stoppedPoint) {
-  const float timeScale = continuousTrajectoryTimeScale();
-  Serial.print("PLAY MODE: CONTINUOUS TIME_SCALE=");
-  Serial.println(timeScale, 2);
+  Serial.print("PLAY MODE: CONSTANT_PACE RATE_HZ=");
+  Serial.print(REPLAY_STEP_RATE_HZ, 1);
+  Serial.print(" MAX_ACCEL_STEPS_S2=");
+  Serial.println(REPLAY_MAX_ACCEL_STEPS_PER_S2, 1);
 
   motorsMoving = true;
   long stepsSinceFeedback = 0;
+  long remainingReplaySteps = 0;
+  for (int i = 1; i < taughtCount; ++i) {
+    remainingReplaySteps += trajectorySegmentStepEvents(i);
+  }
+  float replayRateHz = 0.0f;
   for (int i = 1; i < taughtCount; ++i) {
     const long targetJ1 = lroundf(taught[i].j1Deg * J1_STEPS_PER_DEG);
     const long deltaJ1 = targetJ1 - atomicReadSteps(j1PositionSteps);
@@ -1734,16 +1783,12 @@ bool executeContinuousTrajectory(int &stoppedPoint) {
     const long countJ1 = labs(deltaJ1);
     const long countJ2 = labs(deltaJ2);
     const long total = max(countJ1, countJ2);
+    remainingReplaySteps =
+        max(0L, remainingReplaySteps - total);
 
-    float durationSeconds = taught[i].seconds - taught[i - 1].seconds;
-    if (durationSeconds <= 0.0f) {
-      durationSeconds = 1.0f / PRODUCT_TEACH_HZ;
-    }
-    unsigned long durationUs = static_cast<unsigned long>(
-        lroundf(durationSeconds * timeScale * 1000000.0f));
-    const unsigned long minimumDurationUs =
-        static_cast<unsigned long>(total) * STEPPER_MIN_STEP_PERIOD_US;
-    if (durationUs < minimumDurationUs) durationUs = minimumDurationUs;
+    const unsigned long durationUs =
+        replaySegmentDurationUs(
+            i, remainingReplaySteps, replayRateHz);
 
     if (!startSegment(deltaJ1, deltaJ2, durationUs)) {
       stoppedPoint = i;
