@@ -45,7 +45,7 @@ assert.match(
 );
 assert.match(firmware, /command == "RELAY ON"\) return setMachinePower\(true\)/);
 assert.match(firmware, /command == "RELAY OFF"\) return setMachinePower\(false\)/);
-assert.match(firmware, /constexpr float CUTTER_EXTRA_LENGTH_MM = 5\.0f;/);
+assert.match(firmware, /constexpr float CUTTER_EXTRA_LENGTH_MM = 0\.0f;/);
 assert.match(firmware, /constexpr bool ASSUME_CUTTER_UNLESS_TRACER = false;/);
 assert.match(
   firmware,

@@ -64,7 +64,7 @@ constexpr float LINK_1_MM = 200.0f;
 constexpr float LINK_2_MM = 200.0f;
 // Positive when the cutter tip extends farther from J2 than the tracer tip.
 // Set this to the measured attachment difference.
-constexpr float CUTTER_EXTRA_LENGTH_MM = 5.0f;
+constexpr float CUTTER_EXTRA_LENGTH_MM = 0.0f;
 constexpr float CUTTER_LINK_2_MM = LINK_2_MM + CUTTER_EXTRA_LENGTH_MM;
 
 constexpr float J1_MIN_DEG = -90.0f;

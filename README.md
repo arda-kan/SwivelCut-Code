@@ -113,11 +113,13 @@ encoder J1/J2, and raw encoder counts.
 
 ## Attachment Length Compensation
 
-`CUTTER_EXTRA_LENGTH_MM` near the top of the firmware defaults to `5.0`. It is
+`CUTTER_EXTRA_LENGTH_MM` near the top of the firmware defaults to `0.0`. It is
 the amount by which the cutter extends farther from J2 than the tracer. Before
 each physical cut or repeat, the traced joint path is converted to XY using the
 tracer length and solved again using the longer cutter length. This preserves
-the traced tip path without accumulating an offset between repeat cuts.
+the traced tip path without accumulating an offset between repeat cuts. Set it
+to a positive measured difference, such as `5.0`, if a future cutter attachment
+extends beyond the tracer.
 
 ## Serial Commands
 
