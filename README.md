@@ -222,6 +222,11 @@ tunable timed durations near the top of the firmware. Cut operations force the
 blade retracted before moving to the start point, lower it for the cutting
 pass, and retract it again on completion or stop.
 
+The machine relay must be ON before either blade command will drive the motor.
+Use `BLADE STATUS` to report relay state, PWM initialization, pins, channel,
+duty, and the software blade position. A successful drive also prints
+`BLADE_DRIVE` with direction, duty, and duration before applying PWM.
+
 ## Replay Mode
 
 `CONTINUOUS_TRAJECTORY_REPLAY` near the top of the firmware selects the replay
