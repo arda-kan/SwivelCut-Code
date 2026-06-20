@@ -1995,6 +1995,45 @@ void runProductCut(bool repeat) {
           : (repeat ? "REPEAT_STOPPED" : "CUT_STOPPED"));
 }
 
+void reversePreparedTaughtPath() {
+  const float totalSeconds = taught[taughtCount - 1].seconds;
+  for (int i = 0; i < taughtCount / 2; ++i) {
+    const int opposite = taughtCount - 1 - i;
+    const TeachPoint first = taught[i];
+    const TeachPoint last = taught[opposite];
+    taught[i] = {
+        totalSeconds - last.seconds, last.j1Deg, last.j2Deg};
+    taught[opposite] = {
+        totalSeconds - first.seconds, first.j1Deg, first.j2Deg};
+  }
+  if (taughtCount % 2 == 1) {
+    const int middle = taughtCount / 2;
+    taught[middle].seconds = totalSeconds - taught[middle].seconds;
+  }
+}
+
+bool prepareTracerReplayFromNearestEndpoint() {
+  float measuredJ1 = 0.0f;
+  float measuredJ2 = 0.0f;
+  if (!encoderJointAngles(measuredJ1, measuredJ2)) {
+    feedbackFault("AS5600 read failed before tracer replay");
+    return false;
+  }
+  const float firstDistance =
+      hypotf(measuredJ1 - taught[0].j1Deg,
+             measuredJ2 - taught[0].j2Deg);
+  const float lastDistance =
+      hypotf(measuredJ1 - taught[taughtCount - 1].j1Deg,
+             measuredJ2 - taught[taughtCount - 1].j2Deg);
+  if (lastDistance < firstDistance) {
+    reversePreparedTaughtPath();
+    Serial.println("TRACER_REPLAY_DIRECTION=REVERSE_FROM_NEAREST_END");
+  } else {
+    Serial.println("TRACER_REPLAY_DIRECTION=FORWARD_FROM_NEAREST_END");
+  }
+  return true;
+}
+
 void runTracerReplay() {
   if (!productReady || !encodersCalibrated ||
       encoderMode != AxisMode::DUAL) {
@@ -2013,6 +2052,7 @@ void runTracerReplay() {
   prepareTaughtPath(
       stabilizationEnabled ? PRODUCT_SMOOTHING_MS : 0.0f,
       stabilizationEnabled ? PRODUCT_MAX_DEVIATION_DEG : 0.0f);
+  if (!prepareTracerReplayFromNearestEndpoint()) return;
   taughtJ1Only = false;
   productState = ProductState::CUTTING;
   tracerReplayActive = true;

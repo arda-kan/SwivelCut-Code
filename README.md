@@ -116,7 +116,10 @@ new movement or use Repeat for another pass.
 Repeat is head-sensitive. A cutter requires a previously completed cut and
 performs the normal blade cycle. A tracer only requires a recorded path and
 replays it without cutter-length compensation or blade movement. Stabilization
-is applied to either replay when enabled.
+is applied to either replay when enabled. Tracer replay starts from whichever
+recorded endpoint is nearest the current arm position. Immediately after
+teaching this normally means replaying from the recorded end back to the start,
+avoiding an unwanted drawing stroke while returning to the first point.
 
 The firmware prints a `REPORT` after operations with software J1/J2, XY,
 encoder J1/J2, and raw encoder counts.

@@ -14,9 +14,16 @@ const replay = firmware.slice(start, end);
 assert.match(replay, /stableHeadType != HeadType::TRACING/);
 assert.match(replay, /taughtCount < 2/);
 assert.match(replay, /prepareTaughtPath/);
+assert.match(replay, /prepareTracerReplayFromNearestEndpoint/);
 assert.match(replay, /replayTeach\(false\)/);
 assert.doesNotMatch(replay, /compensateTaughtPathForCutter/);
 assert.doesNotMatch(replay, /bladeDown/);
 assert.doesNotMatch(replay, /productHasLastCut/);
+
+assert.match(firmware, /void reversePreparedTaughtPath\(\)/);
+assert.match(
+  firmware,
+  /if \(lastDistance < firstDistance\) \{\s+reversePreparedTaughtPath\(\);/,
+);
 
 console.log("tracer replay logic tests: OK");
