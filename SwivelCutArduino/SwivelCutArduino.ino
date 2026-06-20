@@ -550,7 +550,7 @@ void refreshButtonLeds() {
   }
 
   for (size_t i = 0; i < BUTTON_COUNT; ++i) {
-    const LedColor requested = on[i] ? LedColor::GREEN : LedColor::RED;
+    const LedColor requested = on[i] ? LedColor::GREEN : LedColor::OFF;
     if (buttonLeds[i].color != requested) {
       writeButtonLed(buttonLeds[i], requested);
     }
