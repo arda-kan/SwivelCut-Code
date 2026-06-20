@@ -31,7 +31,9 @@ Both HTML tools are self-contained and can be opened directly in a browser.
 Coordinates use positive X to the physical right and positive Y forward.
 Because the folded J2 pose is equivalently `+180°` or `-180°`, encoder readings
 that continue above `+180°` are wrapped into the negative branch. For example,
-an encoder-derived `196°` becomes `-164°`.
+an encoder-derived `196°` becomes `-164°`. Validation, feedback, and replay use
+the shortest circular difference across this boundary, so adjacent samples at
+`+179°` and `-179°` are treated as 2° apart rather than a 358° jump.
 
 ## ESP32 Pins
 

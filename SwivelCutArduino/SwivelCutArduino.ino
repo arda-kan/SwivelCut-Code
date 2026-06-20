@@ -409,6 +409,14 @@ float normalizeJointDegrees(float degreesValue) {
   return degreesValue;
 }
 
+float shortestJointDelta(float targetDeg, float currentDeg) {
+  return normalizeJointDegrees(targetDeg - currentDeg);
+}
+
+float equivalentJointTargetNear(float targetDeg, float referenceDeg) {
+  return referenceDeg + shortestJointDelta(targetDeg, referenceDeg);
+}
+
 void disableDrivers();
 void stopMotionSegment();
 void serviceProductWorkflow();
@@ -1154,7 +1162,8 @@ bool checkFeedback() {
     return false;
   }
   const float errorJ1 = measuredJ1 - currentJ1Deg();
-  const float errorJ2 = measuredJ2 - currentJ2Deg();
+  const float errorJ2 =
+      shortestJointDelta(measuredJ2, currentJ2Deg());
   if ((armMode != AxisMode::J2_ONLY &&
        fabsf(errorJ1) > FEEDBACK_MAX_ERROR_DEG) ||
       (armMode != AxisMode::J1_ONLY &&
@@ -1229,7 +1238,7 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
     return false;
   }
   if (armMode == AxisMode::J1_ONLY &&
-      fabsf(j2Deg - currentJ2Deg()) > 0.001f) {
+      fabsf(shortestJointDelta(j2Deg, currentJ2Deg())) > 0.001f) {
     Serial.println("ERROR: ARM J1 mode blocks J2 motion");
     return false;
   }
@@ -1245,7 +1254,9 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
 
   for (int correction = 0; correction <= FEEDBACK_MAX_CORRECTIONS; ++correction) {
     long targetJ1 = lroundf(j1Deg * J1_STEPS_PER_DEG);
-    long targetJ2 = lroundf(j2Deg * J2_STEPS_PER_DEG);
+    const float equivalentJ2 =
+        equivalentJointTargetNear(j2Deg, currentJ2Deg());
+    long targetJ2 = lroundf(equivalentJ2 * J2_STEPS_PER_DEG);
     if (!executeSteps(
             targetJ1 - atomicReadSteps(j1PositionSteps),
             targetJ2 - atomicReadSteps(j2PositionSteps))) return false;
@@ -1258,7 +1269,7 @@ bool moveToAngles(float j1Deg, float j2Deg, bool report = true) {
       return false;
     }
     const float errorJ1 = j1Deg - measuredJ1;
-    const float errorJ2 = j2Deg - measuredJ2;
+    const float errorJ2 = shortestJointDelta(j2Deg, measuredJ2);
     const bool j1Settled =
         armMode == AxisMode::J2_ONLY ||
         fabsf(errorJ1) <= FEEDBACK_TOLERANCE_DEG;
@@ -1641,8 +1652,8 @@ void recordTeach(float seconds, float hz, bool j1Only,
   for (int i = 1; i < taughtCount; ++i) {
     const float jumpJ1 =
         fabsf(rawTaught[i].j1Deg - rawTaught[i - 1].j1Deg);
-    const float jumpJ2 =
-        fabsf(rawTaught[i].j2Deg - rawTaught[i - 1].j2Deg);
+    const float jumpJ2 = fabsf(shortestJointDelta(
+        rawTaught[i].j2Deg, rawTaught[i - 1].j2Deg));
     if (jumpJ1 > 5.0f || (!j1Only && jumpJ2 > 5.0f)) {
       Serial.print("TEACH REJECTED: encoder jump at point ");
       Serial.print(i);
@@ -1687,12 +1698,12 @@ float continuousTrajectoryTimeScale() {
     }
     const long previousJ1 =
         lroundf(taught[i - 1].j1Deg * J1_STEPS_PER_DEG);
-    const long previousJ2 =
-        lroundf(taught[i - 1].j2Deg * J2_STEPS_PER_DEG);
     const long targetJ1 = lroundf(taught[i].j1Deg * J1_STEPS_PER_DEG);
-    const long targetJ2 = lroundf(taught[i].j2Deg * J2_STEPS_PER_DEG);
+    const long j2StepDelta = lroundf(
+        shortestJointDelta(taught[i].j2Deg, taught[i - 1].j2Deg) *
+        J2_STEPS_PER_DEG);
     const long stepEvents =
-        max(labs(targetJ1 - previousJ1), labs(targetJ2 - previousJ2));
+        max(labs(targetJ1 - previousJ1), labs(j2StepDelta));
     const float minimumSeconds =
         stepEvents * STEPPER_MIN_STEP_PERIOD_US / 1000000.0f;
     timeScale = max(
@@ -1711,9 +1722,10 @@ bool executeContinuousTrajectory(int &stoppedPoint) {
   long stepsSinceFeedback = 0;
   for (int i = 1; i < taughtCount; ++i) {
     const long targetJ1 = lroundf(taught[i].j1Deg * J1_STEPS_PER_DEG);
-    const long targetJ2 = lroundf(taught[i].j2Deg * J2_STEPS_PER_DEG);
     const long deltaJ1 = targetJ1 - atomicReadSteps(j1PositionSteps);
-    const long deltaJ2 = targetJ2 - atomicReadSteps(j2PositionSteps);
+    const long deltaJ2 = lroundf(
+        shortestJointDelta(taught[i].j2Deg, currentJ2Deg()) *
+        J2_STEPS_PER_DEG);
     const long countJ1 = labs(deltaJ1);
     const long countJ2 = labs(deltaJ2);
     const long total = max(countJ1, countJ2);
@@ -1857,8 +1869,8 @@ bool validateRawTeachPath(bool j1Only) {
   for (int i = 1; i < taughtCount; ++i) {
     const float jumpJ1 =
         fabsf(rawTaught[i].j1Deg - rawTaught[i - 1].j1Deg);
-    const float jumpJ2 =
-        fabsf(rawTaught[i].j2Deg - rawTaught[i - 1].j2Deg);
+    const float jumpJ2 = fabsf(shortestJointDelta(
+        rawTaught[i].j2Deg, rawTaught[i - 1].j2Deg));
     if (jumpJ1 > 5.0f || (!j1Only && jumpJ2 > 5.0f)) {
       Serial.print("TEACH_REJECTED_ENCODER_JUMP POINT=");
       Serial.print(i);
@@ -2032,10 +2044,11 @@ bool prepareTracerReplayFromNearestEndpoint() {
   }
   const float firstDistance =
       hypotf(measuredJ1 - taught[0].j1Deg,
-             measuredJ2 - taught[0].j2Deg);
+             shortestJointDelta(measuredJ2, taught[0].j2Deg));
   const float lastDistance =
       hypotf(measuredJ1 - taught[taughtCount - 1].j1Deg,
-             measuredJ2 - taught[taughtCount - 1].j2Deg);
+             shortestJointDelta(
+                 measuredJ2, taught[taughtCount - 1].j2Deg));
   if (lastDistance < firstDistance) {
     reversePreparedTaughtPath();
     Serial.println("TRACER_REPLAY_DIRECTION=REVERSE_FROM_NEAREST_END");
