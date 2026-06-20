@@ -11,6 +11,8 @@ assert.match(firmware, /constexpr int START_STOP_BUTTON_PIN = 2;/);
 assert.match(firmware, /constexpr int STABILIZATION_BUTTON_PIN = 36;/);
 assert.match(firmware, /constexpr int REPEAT_BUTTON_PIN = 39;/);
 assert.match(firmware, /constexpr int RELAY_BUTTON_PIN = 0;/);
+assert.match(firmware, /constexpr bool INVERT_J1 = false;/);
+assert.match(firmware, /constexpr bool INVERT_J2 = true;/);
 assert.match(firmware, /constexpr uint8_t RELAY_CONNECTED_LEVEL = HIGH;/);
 assert.match(firmware, /constexpr uint8_t RELAY_DISCONNECTED_LEVEL = LOW;/);
 assert.match(

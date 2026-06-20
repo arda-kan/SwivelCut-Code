@@ -72,7 +72,7 @@ constexpr float J1_MAX_DEG = 90.0f;
 constexpr float J2_MIN_DEG = -180.0f;
 constexpr float J2_MAX_DEG = 180.0f;
 constexpr bool INVERT_J1 = false;
-constexpr bool INVERT_J2 = false;
+constexpr bool INVERT_J2 = true;
 
 // Change these three levels only if the driver's input wiring is changed.
 constexpr uint8_t STEP_ACTIVE = HIGH;
