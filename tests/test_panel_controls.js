@@ -43,7 +43,11 @@ assert.match(
 );
 assert.match(
   firmware,
-  /void setMachinePower\(bool enabled\) \{[\s\S]*disableDrivers\(\);[\s\S]*setRelayConnected\(false\);[\s\S]*setRelayConnected\(true\);[\s\S]*armAtFoldedPose\(AxisMode::DUAL\);/,
+  /void setMachinePower\(bool enabled\) \{[\s\S]*setRelayConnected\(true\);[\s\S]*armAtFoldedPose\(AxisMode::DUAL, false\);[\s\S]*if \(!encodersCalibrated \|\| !productReady\)[\s\S]*MACHINE_ON ARMS_HOMED_AND_DISARMED/,
+);
+assert.match(
+  firmware,
+  /void armAtFoldedPose\(AxisMode mode, bool enableAfterCalibration\)[\s\S]*if \(enableAfterCalibration\) \{[\s\S]*enableDrivers\(\);[\s\S]*\} else \{[\s\S]*disableDrivers\(\);/,
 );
 assert.match(firmware, /command == "RELAY ON"\) return setMachinePower\(true\)/);
 assert.match(firmware, /command == "RELAY OFF"\) return setMachinePower\(false\)/);

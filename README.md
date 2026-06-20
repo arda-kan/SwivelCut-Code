@@ -59,8 +59,10 @@ internal pull-ups and require the external 10 kΩ pull-ups used by the supplied
 button test. GPIO0 and GPIO2 use `INPUT_PULLUP`. Button 4 toggles the relay:
 GPIO15 HIGH connects it and LOW disconnects it. At startup the relay and motor
 drivers are off. Turning button 4 ON requires the arm to be physically folded;
-the firmware then zeros the folded pose, calibrates both encoders, and enables
-the arms. Turning it OFF disables the arms before disconnecting the relay.
+the firmware then zeros the folded pose and calibrates both encoders, but leaves
+the motor drivers disabled so the arms remain manually movable while waiting.
+Replay or cutting enables the arms only when motion starts. Turning power OFF
+keeps the arms disabled before disconnecting the relay.
 
 The four indicators are WS2812 addressable LEDs on GPIO4, using GRB order and
 brightness 64. The physical strip runs in reverse panel order: Start/Stop uses

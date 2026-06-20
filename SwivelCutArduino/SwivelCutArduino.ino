@@ -408,7 +408,7 @@ void stopMotionSegment();
 void serviceProductWorkflow();
 void handleProductButtonChange(const ButtonInput &button);
 void printOperationReport(const char *label);
-void armAtFoldedPose(AxisMode mode);
+void armAtFoldedPose(AxisMode mode, bool enableAfterCalibration = true);
 void refreshButtonLeds();
 void setMachinePower(bool enabled);
 bool bladeIsDown();
@@ -470,11 +470,11 @@ void setMachinePower(bool enabled) {
 
   Serial.println(
       "MACHINE_ON: current arm pose must be physically folded; "
-      "homing and enabling arms");
+      "calibrating home with motor drivers disabled");
   setRelayConnected(true);
   delay(100);
-  armAtFoldedPose(AxisMode::DUAL);
-  if (!armed || !productReady) {
+  armAtFoldedPose(AxisMode::DUAL, false);
+  if (!encodersCalibrated || !productReady) {
     disableDrivers();
     setRelayConnected(false);
     refreshButtonLeds();
@@ -482,7 +482,7 @@ void setMachinePower(bool enabled) {
     return;
   }
   refreshButtonLeds();
-  Serial.println("MACHINE_ON ARMS_HOMED_AND_ENABLED");
+  Serial.println("MACHINE_ON ARMS_HOMED_AND_DISARMED");
 }
 
 void refreshButtonLeds() {
@@ -2246,7 +2246,7 @@ void printHelp() {
   Serial.println("  BLADE RETRACTED | BLADE DOWN");
 }
 
-void armAtFoldedPose(AxisMode mode) {
+void armAtFoldedPose(AxisMode mode, bool enableAfterCalibration) {
   disableDrivers();
   atomicWriteSteps(j1PositionSteps, 0);
   atomicWriteSteps(
@@ -2271,13 +2271,20 @@ void armAtFoldedPose(AxisMode mode) {
     Serial.println("ERROR: single-axis ARM requires an encoder branch");
     return;
   }
-  enableDrivers();
-  armed = true;
   productReady = mode == AxisMode::DUAL;
+  if (enableAfterCalibration) {
+    enableDrivers();
+    armed = true;
+  } else {
+    disableDrivers();
+  }
   if (mode == AxisMode::J1_ONLY) {
     Serial.println("ARMED J1 TEST: only J1 motion is allowed");
   } else if (mode == AxisMode::J2_ONLY) {
     Serial.println("ARMED J2 TEST: J2 homed at 180; only J2 motion is allowed");
+  } else if (!enableAfterCalibration) {
+    Serial.println(
+        "HOME CALIBRATED at J1=0, J2=180; motor drivers remain disabled");
   } else {
     Serial.println(
         "ARMED at J1=0, J2=180; physical product buttons enabled");
