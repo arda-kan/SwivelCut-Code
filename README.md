@@ -131,6 +131,11 @@ avoiding an unwanted drawing stroke while returning to the first point.
 The firmware prints a `REPORT` after operations with software J1/J2, XY,
 encoder J1/J2, and raw encoder counts.
 
+Every completed or stopped replay also prints `REPLAY_ENDPOINT` before the
+motor drivers release. It includes the final target J1/J2, measured encoder
+J1/J2, and signed endpoint errors. J2 error uses circular-angle comparison
+across the folded `+180°/-180°` boundary.
+
 ## Attachment Length Compensation
 
 `CUTTER_EXTRA_LENGTH_MM` near the top of the firmware defaults to `0.0`. It is

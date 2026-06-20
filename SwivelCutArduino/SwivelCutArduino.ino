@@ -1770,6 +1770,37 @@ bool executeContinuousTrajectory(int &stoppedPoint) {
   return true;
 }
 
+void printReplayEndpointReport(int targetPoint, bool completed) {
+  if (taughtCount == 0) return;
+  targetPoint = constrain(targetPoint, 0, taughtCount - 1);
+  float measuredJ1 = 0.0f;
+  float measuredJ2 = 0.0f;
+  Serial.print("REPLAY_ENDPOINT status=");
+  Serial.print(completed ? "COMPLETE" : "STOPPED");
+  Serial.print(" point=");
+  Serial.print(targetPoint);
+  Serial.print("/");
+  Serial.print(taughtCount - 1);
+  Serial.print(" target_J1=");
+  Serial.print(taught[targetPoint].j1Deg, 2);
+  Serial.print(" target_J2=");
+  Serial.print(taught[targetPoint].j2Deg, 2);
+  if (encoderJointAngles(measuredJ1, measuredJ2)) {
+    Serial.print(" measured_J1=");
+    Serial.print(measuredJ1, 2);
+    Serial.print(" measured_J2=");
+    Serial.print(measuredJ2, 2);
+    Serial.print(" error_J1=");
+    Serial.print(taught[targetPoint].j1Deg - measuredJ1, 2);
+    Serial.print(" error_J2=");
+    Serial.print(
+        shortestJointDelta(taught[targetPoint].j2Deg, measuredJ2), 2);
+  } else {
+    Serial.print(" measured=READ_ERROR");
+  }
+  Serial.println();
+}
+
 bool replayTeach(bool operateBlade = false) {
   if (!USE_ENCODERS || taughtCount == 0) {
     Serial.println("ERROR: no taught movement");
@@ -1824,12 +1855,14 @@ bool replayTeach(bool operateBlade = false) {
     Serial.print(stoppedPoint);
     Serial.print("/");
     Serial.println(taughtCount - 1);
+    printReplayEndpointReport(stoppedPoint, false);
     disableDrivers();
     if (bladeIsDown()) bladeRetracted();
     if (!operateBlade) printOperationReport("PLAY_STOPPED");
     return false;
   }
 
+  printReplayEndpointReport(taughtCount - 1, true);
   disableDrivers();
   if (bladeIsDown()) bladeRetracted();
   Serial.print("PLAYED: ");
