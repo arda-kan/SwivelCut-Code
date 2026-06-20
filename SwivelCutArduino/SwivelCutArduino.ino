@@ -410,6 +410,8 @@ void printOperationReport(const char *label);
 void armAtFoldedPose(AxisMode mode);
 void refreshButtonLeds();
 void setMachinePower(bool enabled);
+bool bladeIsDown();
+void bladeRetracted(bool force = false);
 
 const char *ledColorName(LedColor color) {
   switch (color) {
@@ -886,7 +888,7 @@ void bladeDown(bool force = false) {
   bladePosition = BladePosition::DOWN;
 }
 
-void bladeRetracted(bool force = false) {
+void bladeRetracted(bool force) {
   if (!force && bladePosition == BladePosition::RETRACTED) return;
   Serial.println("BLADE_RETRACTED");
   if (BLADE_REVERSE_TO_RETRACT) {

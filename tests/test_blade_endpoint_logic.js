@@ -9,6 +9,8 @@ const firmware = fs.readFileSync(
 assert.ok(firmware.includes("constexpr float BLADE_DOWN_SECONDS"));
 assert.ok(firmware.includes("constexpr float BLADE_RETRACT_SECONDS"));
 assert.ok(firmware.includes("enum class BladePosition"));
+assert.ok(firmware.includes("bool bladeIsDown();"));
+assert.ok(firmware.includes("void bladeRetracted(bool force = false);"));
 assert.ok(firmware.includes('command == "BLADE RETRACTED"'));
 assert.ok(firmware.includes('command == "BLADE DOWN"'));
 assert.ok(!firmware.includes('command == "BLADE UP"'));
