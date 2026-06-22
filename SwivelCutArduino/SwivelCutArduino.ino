@@ -171,6 +171,7 @@ enum class LedColor {
   OFF,
   RED,
   GREEN,
+  WHITE,
 };
 
 struct ButtonLed {
@@ -462,6 +463,8 @@ const char *ledColorName(LedColor color) {
       return "RED";
     case LedColor::GREEN:
       return "GREEN";
+    case LedColor::WHITE:
+      return "WHITE";
     default:
       return "OFF";
   }
@@ -471,7 +474,9 @@ void writeButtonLed(ButtonLed &led, LedColor color) {
   buttonLedPixels[led.pixelIndex] =
       color == LedColor::RED
           ? CRGB::Red
-          : (color == LedColor::GREEN ? CRGB::Green : CRGB::Black);
+          : (color == LedColor::GREEN
+                 ? CRGB::Green
+                 : (color == LedColor::WHITE ? CRGB::White : CRGB::Black));
   FastLED.show();
   led.color = color;
 }
@@ -559,7 +564,9 @@ void refreshButtonLeds() {
   }
 
   for (size_t i = 0; i < BUTTON_COUNT; ++i) {
-    const LedColor requested = on[i] ? LedColor::GREEN : LedColor::OFF;
+    const LedColor requested =
+        on[i] ? (i == 3 ? LedColor::WHITE : LedColor::GREEN)
+              : LedColor::OFF;
     if (buttonLeds[i].color != requested) {
       writeButtonLed(buttonLeds[i], requested);
     }
@@ -2542,7 +2549,7 @@ void printHelp() {
   Serial.println(
       "  On/Off (button 4): relay ON homes/enables folded arms; OFF disables");
   Serial.println(
-      "  WS2812 LEDs (GPIO4): red=off, green=on; one pixel per button");
+      "  WS2812 LEDs (GPIO4): green=on, power button=white; one pixel per button");
   Serial.println("  Product buttons are ignored while motors are moving");
   Serial.println("Commands:");
   Serial.println("  ARM FOLDED | ARM J1 | ARM J2 | DISARM");

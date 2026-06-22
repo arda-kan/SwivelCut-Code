@@ -75,7 +75,8 @@ keeps the arms disabled before disconnecting the relay.
 The four indicators are WS2812 addressable LEDs on GPIO4, using GRB order and
 brightness 64. The physical strip runs in reverse panel order: Start/Stop uses
 pixel 1, Stabilization pixel 2, Repeat pixel 3, and Relay pixel 0. Green means
-active; inactive indicators are completely off. When the relay/on-off button
+active for the first three buttons; the Relay/on-off indicator is white when
+active. Inactive indicators are completely off. When the relay/on-off button
 is OFF, all four pixels remain off.
 
 `CONTROL TEST ON` is intentionally different: button 4 only exercises the
@@ -196,7 +197,7 @@ HELP
 ```
 
 `CONTROL TEST ON` disables the motors and blade, prints debounced button
-press/release levels, toggles the corresponding red/green LED on every press,
+press/release levels, toggles the corresponding indicator on every press,
 and allows button 4 to exercise the relay. After its initial snapshot, output
 is printed only when a button, LED, relay, or head state changes. `CONTROLS`,
 `LEDS`, and `PINS` provide one-shot serial wiring reports.

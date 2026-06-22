@@ -27,8 +27,9 @@ assert.match(firmware, /constexpr int BUTTON_LED_COUNT = 4;/);
 assert.match(firmware, /FastLED\.addLeds<WS2812, BUTTON_LED_DATA_PIN, GRB>/);
 assert.match(
   firmware,
-  /const LedColor requested = on\[i\] \? LedColor::GREEN : LedColor::OFF;/,
+  /on\[i\] \? \(i == 3 \? LedColor::WHITE : LedColor::GREEN\)\s+: LedColor::OFF;/,
 );
+assert.match(firmware, /LedColor::WHITE \? CRGB::White : CRGB::Black/);
 assert.match(firmware, /pinMode\(START_STOP_BUTTON_PIN, INPUT_PULLUP\);/);
 assert.match(firmware, /pinMode\(STABILIZATION_BUTTON_PIN, INPUT\);/);
 assert.match(firmware, /pinMode\(REPEAT_BUTTON_PIN, INPUT\);/);
